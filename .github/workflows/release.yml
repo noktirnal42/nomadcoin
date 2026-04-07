@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: nomadcoin-macos
+            bin: nomadcoin-gui
+            features: --features gui
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: nomadcoin-linux
+            bin: nomadcoin
+            features: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: nomadcoin-windows
+            bin: nomadcoin
+            features: ""
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Build Release
+      run: cargo build --release ${{ matrix.features }} --bin ${{ matrix.bin }}
+
+    - name: Package macOS App
+      if: runner.os == 'macOS'
+      run: |
+        chmod +x scripts/build-app.sh
+        ./scripts/build-app.sh
+        zip -r ${{ matrix.artifact }}.zip NomadCoin.app
+
+    - name: Package Linux/Windows
+      if: runner.os != 'macOS'
+      run: |
+        cp target/release/${{ matrix.bin }} ${{ matrix.artifact }}
+        zip ${{ matrix.artifact }}.zip ${{ matrix.artifact }}
+
+    - name: Upload Release Asset
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact }}
+        path: ${{ matrix.artifact }}.zip
+
+  build-mobile:
+    name: Build Mobile Apps
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            platform: ios
+          - os: ubuntu-latest
+            platform: android
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.x'
+
+    - name: Setup Java (Android)
+      if: matrix.platform == 'android'
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    - name: Get dependencies
+      working-directory: mobile/nomadcoin
+      run: flutter pub get
+
+    - name: Build iOS
+      if: matrix.platform == 'ios'
+      working-directory: mobile/nomadcoin
+      run: flutter build ios --release --no-codesign
+
+    - name: Build Android APK
+      if: matrix.platform == 'android'
+      working-directory: mobile/nomadcoin
+      run: flutter build apk --release
+
+    - name: Upload iOS Build
+      if: matrix.platform == 'ios'
+      uses: actions/upload-artifact@v4
+      with:
+        name: nomadcoin-ios
+        path: mobile/nomadcoin/build/ios/iphoneos/Runner.app
+
+    - name: Upload Android APK
+      if: matrix.platform == 'android'
+      uses: actions/upload-artifact@v4
+      with:
+        name: nomadcoin-android
+        path: mobile/nomadcoin/build/app/outputs/flutter-apk/app-release.apk

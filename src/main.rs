@@ -1,0 +1,593 @@
+pub mod blockchain;
+pub mod consensus;
+pub mod crypto;
+pub mod mesh;
+pub mod miner;
+pub mod network;
+pub mod storage;
+pub mod types;
+pub mod wallet;
+
+use clap::Parser;
+use tracing_subscriber;
+
+/// NomadCoin - A mobile-first cryptocurrency for the nomadic community
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Command to run
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum Commands {
+    /// Create a new wallet
+    Wallet {
+        /// Number of addresses to generate
+        #[arg(short, long, default_value_t = 1)]
+        count: u32,
+    },
+    /// Create and sign a transaction
+    Send {
+        /// Sender address
+        #[arg(long)]
+        from: String,
+        /// Recipient address
+        #[arg(long)]
+        to: String,
+        /// Amount to send
+        #[arg(long)]
+        amount: f64,
+        /// Transaction fee
+        #[arg(long, default_value_t = 0.001)]
+        fee: f64,
+    },
+    /// Initialize a new blockchain
+    Init {
+        /// Chain ID
+        #[arg(long, default_value = "nomadcoin")]
+        chain_id: String,
+        /// Community allocation amount
+        #[arg(long, default_value_t = 10_000_000.0)]
+        allocation: f64,
+        /// Data directory
+        #[arg(long, default_value = "~/.nomadcoin")]
+        data_dir: String,
+    },
+    /// Start mining
+    Mine {
+        /// Wallet address
+        #[arg(long)]
+        address: String,
+        /// Device type (auto, android, ios, darwin, linux, windows)
+        #[arg(long, default_value = "auto")]
+        device: String,
+        /// Continue mining indefinitely
+        #[arg(long, short, default_value_t = false)]
+        continuous: bool,
+    },
+    /// Run a full node
+    Node {
+        /// Port to listen on
+        #[arg(short, long, default_value_t = 9333)]
+        port: u16,
+        /// Data directory
+        #[arg(long, default_value = "~/.nomadcoin")]
+        data_dir: String,
+        /// Peer addresses to connect to
+        #[arg(long)]
+        peers: Vec<String>,
+    },
+    /// Register as a validator
+    RegisterValidator {
+        /// Validator address
+        #[arg(long)]
+        address: String,
+        /// Stake amount
+        #[arg(long)]
+        stake: u64,
+        /// Is mobile validator
+        #[arg(long, default_value_t = false)]
+        mobile: bool,
+        /// Data directory
+        #[arg(long, default_value = "~/.nomadcoin")]
+        data_dir: String,
+    },
+    /// Show node status
+    Status {
+        /// Data directory
+        #[arg(long, default_value = "~/.nomadcoin")]
+        data_dir: String,
+    },
+}
+
+fn expand_path(path: &str) -> String {
+    if path.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(&path[2..]).to_string_lossy().to_string();
+        }
+    }
+    path.to_string()
+}
+
+fn main() {
+    // Initialize logging
+    tracing_subscriber::fmt::init();
+
+    let args = Args::parse();
+
+    match args.command {
+        Commands::Wallet { count } => {
+            run_wallet(count);
+        }
+        Commands::Send {
+            from,
+            to,
+            amount,
+            fee,
+        } => {
+            run_send(&from, &to, amount, fee);
+        }
+        Commands::Init {
+            chain_id,
+            allocation,
+            data_dir,
+        } => {
+            run_init(&chain_id, allocation, &data_dir);
+        }
+        Commands::Mine { address, device, continuous } => {
+            run_mine(&address, &device, continuous);
+        }
+        Commands::Node {
+            port,
+            data_dir,
+            peers,
+        } => {
+            run_node(port, &data_dir, &peers);
+        }
+        Commands::RegisterValidator {
+            address,
+            stake,
+            mobile,
+            data_dir,
+        } => {
+            run_register_validator(&address, stake, mobile, &data_dir);
+        }
+        Commands::Status { data_dir } => {
+            run_status(&data_dir);
+        }
+    }
+}
+
+fn run_wallet(count: u32) {
+    println!("🔐 NomadCoin Wallet Generator");
+    println!("=============================\n");
+
+    let mut wallet = wallet::Wallet::new();
+
+    for i in 0..count {
+        let addr = wallet.create_address();
+        println!("Address #{}:", i + 1);
+        println!("  Address:    {}", addr.address);
+        println!("  Public Key: {}", addr.public_key);
+        println!(
+            "  Private Key: {} (KEEP SECRET!)\n",
+            addr.private_key
+        );
+    }
+
+    println!("✅ Generated {} address(es)", count);
+}
+
+fn run_send(from: &str, to: &str, amount: f64, fee: f64) {
+    println!("💸 NomadCoin Transaction");
+    println!("=========================\n");
+
+    let mut wallet = wallet::Wallet::new();
+
+    // In production, load wallet from storage
+    // For demo, create a new address and simulate
+    let addr = wallet.create_address();
+
+    match wallet.send_transaction(
+        &addr.address,
+        to,
+        amount,
+        fee,
+        Some("NomadCoin payment".to_string()),
+    ) {
+        Ok(tx) => {
+            println!("✅ Transaction Created!");
+            println!("  TX ID:      {}", tx.txid);
+            println!("  From:       {}", from);
+            println!("  To:         {}", to);
+            println!("  Amount:     {} NOMAD", amount);
+            println!("  Fee:        {} NOMAD", fee);
+            println!("  Timestamp:  {}", tx.timestamp);
+            if let Some(memo) = tx.memo {
+                println!("  Memo:       {}", memo);
+            }
+        }
+        Err(e) => {
+            eprintln!("❌ Transaction failed: {}", e);
+        }
+    }
+}
+
+fn run_init(chain_id: &str, allocation: f64, data_dir: &str) {
+    println!("🌐 NomadCoin Blockchain Initialization");
+    println!("=====================================\n");
+
+    let path = expand_path(data_dir);
+    let db_path = format!("{}/chaindata", path);
+
+    // Create data directory
+    std::fs::create_dir_all(&path).expect("Failed to create data directory");
+
+    // Initialize storage
+    let storage = storage::Storage::new(&db_path).expect("Failed to open database");
+
+    // Initialize blockchain
+    let mut blockchain = blockchain::Blockchain::new();
+    let community_address = "nomad1community0000000000000000000000000".to_string();
+
+    blockchain.create_genesis(allocation, community_address.clone());
+
+    // Save to database
+    storage
+        .save_blockchain(&blockchain)
+        .expect("Failed to save blockchain");
+
+    // Initialize consensus
+    let consensus = consensus::ConsensusEngine::new(100, 1.5);
+    storage
+        .save_consensus(&consensus)
+        .expect("Failed to save consensus");
+
+    println!("✅ Blockchain Initialized!");
+    println!("  Chain ID:              {}", chain_id);
+    println!("  Community Allocation:  {} NOMAD", allocation);
+    println!("  Community Address:     {}", community_address);
+    println!("  Genesis Block Height:  {}", blockchain.height());
+    println!(
+        "  Genesis TX Count:      {}",
+        blockchain.state.blocks[0].transactions.len()
+    );
+    println!("  Data Directory:        {}", path);
+}
+
+fn run_mine(address: &str, device: &str, continuous: bool) {
+    println!("⛏️  NomadCoin Mobile Miner");
+    println!("========================\n");
+
+    let mut miner = miner::MinerService::new(address.to_string(), device.to_string());
+    miner.start_mining();
+
+    // Get actual detected device type
+    let actual_device = miner.device_type.clone();
+    let boost = if actual_device == "android" || actual_device == "ios" {
+        "1.5x (mobile)"
+    } else if actual_device == "macos" || actual_device == "linux" || actual_device == "windows" {
+        "1.0x (desktop)"
+    } else {
+        "1.0x (unknown)"
+    };
+
+    println!("✅ Mining Started!");
+    println!("  Wallet:     {}", address);
+    println!("  Device:     {} (auto-detected)", actual_device);
+    println!("  Status:     Active");
+    println!("  Boost:     {}", boost);
+
+    if continuous {
+        println!("\n🔄 Continuous mining - Press Ctrl+C to stop...\n");
+        
+        // Continuous mining loop
+        let mut validation_num = 0;
+        loop {
+            validation_num += 1;
+            let tx_hash = format!("simulated_tx_{}", validation_num);
+            miner.perform_validation(&tx_hash);
+            
+            let stats = miner.get_stats();
+            println!(
+                "📊 Validations: {} | Earnings: {:.4} NOMAD | TX: {}",
+                stats.total_validations, 
+                stats.total_earnings,
+                &tx_hash[..8]
+            );
+            
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+    } else {
+        // Single batch (default behavior)
+        for i in 1..=5 {
+            miner.perform_validation(&format!("simulated_tx_{}", i));
+        }
+
+        let stats = miner.get_stats();
+        println!("\n📊 Mining Statistics:");
+        println!("  Validations:     {}", stats.total_validations);
+        println!("  Earnings:        {:.4} NOMAD", stats.total_earnings);
+        println!("  Mobile Boost:    {:.1}x", stats.mobile_boost_multiplier);
+
+        // Sync
+        let synced = miner.sync_with_network();
+        println!("  Synced:          {} validations", synced);
+    }
+}
+
+#[tokio::main]
+async fn run_node(port: u16, data_dir: &str, peers: &[String]) {
+    println!("🔗 NomadCoin Node");
+    println!("=================\n");
+
+    let path = expand_path(data_dir);
+    let db_path = format!("{}/chaindata", path);
+
+    // Create data directory if not exists
+    std::fs::create_dir_all(&path).expect("Failed to create data directory");
+
+    // Initialize or load storage
+    let storage = storage::Storage::new(&db_path).expect("Failed to open database");
+
+    // Load or create blockchain
+    let mut blockchain = match storage.load_blockchain().expect("Failed to load blockchain") {
+        Some(bc) => bc,
+        None => {
+            println!("No existing blockchain found. Creating genesis...");
+            let mut bc = blockchain::Blockchain::new();
+            bc.create_genesis(
+                10_000_000.0,
+                "nomad1community0000000000000000000000000".to_string(),
+            );
+            bc
+        }
+    };
+
+    // Load consensus engine
+    let mut consensus = storage
+        .load_consensus(100, 1.5)
+        .expect("Failed to load consensus");
+
+    println!("Starting node on port {}...", port);
+    println!("  Network:    nomadcoin");
+    println!("  Port:       {}", port);
+    println!("  Data Dir:   {}", path);
+    println!("  Height:     {}", blockchain.height());
+    println!("  Validators: {}", consensus.validator_count());
+
+    // Create channel for transactions
+    let (tx_sender, mut tx_receiver) = tokio::sync::mpsc::channel(100);
+
+    // Initialize P2P network
+    let mut network = network::P2PNetwork::new(tx_sender);
+
+    // Start P2P server
+    if let Err(e) = network.start_server(port).await {
+        eprintln!("Failed to start P2P server: {}", e);
+        println!("Running in standalone mode (P2P disabled)");
+    }
+
+    // Connect to peers
+    for peer in peers {
+        if let Err(e) = network.connect_to_peer(peer).await {
+            eprintln!("Failed to connect to peer {}: {}", peer, e);
+        }
+    }
+
+    println!("  Peers:      {}", network.peer_count());
+    println!("\nPress Ctrl+C to stop.");
+
+    // Main node loop
+    let mut block_interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+
+    loop {
+        tokio::select! {
+            // Process incoming transactions
+            Some(tx) = tx_receiver.recv() => {
+                if let Err(e) = blockchain.add_to_mempool(tx) {
+                    tracing::warn!("Failed to add transaction to mempool: {}", e);
+                }
+            }
+
+            // Produce blocks on schedule
+            _ = block_interval.tick() => {
+                if blockchain.mempool_size() > 0 || blockchain.height() == 0 {
+                    // Select proposer
+                    if let Some(proposer) = consensus.select_proposer() {
+                        // Start consensus round
+                        let next_height = blockchain.height() + 1;
+                        consensus.start_round(next_height, proposer.clone());
+
+                        // Simulate validator votes (in production, this is distributed)
+                        for validator_addr in consensus.validators.keys().cloned().collect::<Vec<_>>() {
+                            let _ = consensus.record_prevote(&validator_addr, true);
+                            let _ = consensus.record_precommit(&validator_addr, true);
+                        }
+
+                        // Check if consensus reached
+                        if consensus.is_consensus_reached() {
+                            // Create block
+                            let block = blockchain.create_block(&proposer);
+
+                            // Finalize consensus
+                            if consensus.finalize_block().is_ok() {
+                                // Save to storage
+                                if let Err(e) = storage.save_blockchain(&blockchain) {
+                                    tracing::error!("Failed to save blockchain: {}", e);
+                                }
+                                if let Err(e) = storage.save_consensus(&consensus) {
+                                    tracing::error!("Failed to save consensus: {}", e);
+                                }
+
+                                // Broadcast block
+                                let block_bytes = serde_json::to_vec(&block).unwrap_or_default();
+                                network.broadcast_block(block_bytes, blockchain.height()).await;
+
+                                println!(
+                                    "✅ Block {} created with {} transactions (proposer: {})",
+                                    blockchain.height(),
+                                    block.header.transaction_count,
+                                    proposer
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn run_register_validator(address: &str, stake: u64, mobile: bool, data_dir: &str) {
+    println!("📋 NomadCoin Validator Registration");
+    println!("==================================\n");
+
+    let path = expand_path(data_dir);
+    let db_path = format!("{}/chaindata", path);
+
+    let storage = storage::Storage::new(&db_path).expect("Failed to open database");
+    let mut consensus = storage
+        .load_consensus(100, 1.5)
+        .expect("Failed to load consensus");
+
+    match consensus.register_validator(address.to_string(), stake, mobile) {
+        Ok(()) => {
+            storage
+                .save_consensus(&consensus)
+                .expect("Failed to save consensus");
+
+            println!("✅ Validator Registered!");
+            println!("  Address:     {}", address);
+            println!("  Stake:       {} NOMAD", stake);
+            println!("  Mobile:      {}", if mobile { "Yes (1.5x boost)" } else { "No" });
+            println!(
+                "  Effective:   {} NOMAD",
+                if mobile {
+                    stake as f64 * 1.5
+                } else {
+                    stake as f64
+                }
+            );
+            println!("  Validators:  {}", consensus.validator_count());
+        }
+        Err(e) => {
+            eprintln!("❌ Registration failed: {}", e);
+        }
+    }
+}
+
+fn run_status(data_dir: &str) {
+     println!("📊 NomadCoin Node Status");
+     println!("========================\n");
+
+    let path = expand_path(data_dir);
+    let db_path = format!("{}/chaindata", path);
+
+    match storage::Storage::new(&db_path) {
+        Ok(storage) => {
+            match storage.get_stats() {
+                Ok(stats) => {
+                    println!("  Latest Block:  {}", stats.latest_height);
+                    println!("  Transactions:  {}", stats.tx_count);
+                    println!("  Balances:      {}", stats.balance_count);
+                    println!();
+
+                    // Load consensus info
+                    match storage.load_consensus(100, 1.5) {
+                        Ok(consensus) => {
+                            println!("  Validators:    {}", consensus.validator_count());
+                            println!(
+                                "  Active:        {}",
+                                consensus.active_validator_count()
+                            );
+                            println!("  Total Stake:   {} NOMAD", consensus.total_stake());
+                        }
+                        Err(_) => {
+                            println!("  Consensus:     Not initialized");
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to get stats: {}", e);
+                }
+            }
+        }
+        Err(_e) => {
+            println!("  Status:     No blockchain data found");
+            println!("  Data Dir:   {}", path);
+            println!();
+            println!("  Run 'nomadcoin-core init' to initialize");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_full_workflow() {
+        // Create wallet
+        let mut wallet = wallet::Wallet::new();
+        let alice = wallet.create_address();
+        let bob = wallet.create_address();
+
+        // Initialize blockchain
+        let mut blockchain = blockchain::Blockchain::new();
+        blockchain.create_genesis(10_000_000.0, alice.address.clone());
+
+        // Check balance
+        let balance = blockchain.get_balance(&alice.address);
+        assert_eq!(balance, 10_000_000.0);
+
+        // Create transaction
+        let tx = wallet.send_transaction(
+            &alice.address,
+            &bob.address,
+            100.0,
+            0.001,
+            Some("payment".to_string()),
+        );
+        assert!(tx.is_ok());
+
+        // Start miner
+        let mut miner = miner::MinerService::new(alice.address.clone(), "android".to_string());
+        miner.start_mining();
+        miner.perform_validation("test_tx");
+        assert!(miner.is_active());
+        assert_eq!(miner.get_validation_count(), 1);
+    }
+
+    #[test]
+    fn test_consensus_integration() {
+        let mut consensus = consensus::ConsensusEngine::new(100, 1.5);
+
+        // Register validators
+        consensus
+            .register_validator("val1".to_string(), 1000, false)
+            .unwrap();
+        consensus
+            .register_validator("val2".to_string(), 500, true)
+            .unwrap();
+
+        assert_eq!(consensus.validator_count(), 2);
+
+        // Select proposer and start round
+        let proposer = consensus.select_proposer().unwrap();
+        consensus.start_round(1, proposer);
+
+        // Record votes
+        consensus.record_prevote("val1", true).unwrap();
+        consensus.record_prevote("val2", true).unwrap();
+        consensus.record_precommit("val1", true).unwrap();
+        consensus.record_precommit("val2", true).unwrap();
+
+        // Check consensus
+        assert!(consensus.is_consensus_reached());
+        assert!(consensus.finalize_block().is_ok());
+        assert_eq!(consensus.height, 1);
+    }
+}

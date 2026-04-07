@@ -1,0 +1,47 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test data
+testnet/
+/tmp/nomadcoin_test_db_*/
+
+# Mobile build artifacts
+mobile/nomadcoin/build/
+mobile/nomadcoin/.dart_tool/
+mobile/nomadcoin/.flutter-plugins
+mobile/nomadcoin/.flutter-plugins-dependencies
+mobile/nomadcoin/ios/.symlinks/
+mobile/nomadcoin/android/.gradle/
+mobile/nomadcoin/android/app/build/
+mobile/nomadcoin/android/local.properties
+mobile/nomadcoin/ios/Pods/
+mobile/nomadcoin/ios/Runner.xcworkspace/
+mobile/nomadcoin/ios/Flutter/Generated.xcconfig
+mobile/nomadcoin/ios/Flutter/flutter_export_environment.sh
+mobile/nomadcoin_miner/build/
+mobile/nomadcoin_miner/.dart_tool/
+mobile/nomadcoin_miner/.flutter-plugins
+mobile/nomadcoin_miner/.flutter-plugins-dependencies
+
+# App bundles
+*.app/
+*.ipa
+*.apk
+
+# Secrets
+.env
+*.key
+*.pem
