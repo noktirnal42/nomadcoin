@@ -235,7 +235,17 @@ cargo fmt
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
+ 
+## 💖 Support NomadCoin
 
+If you find NomadCoin useful, consider supporting development:
+- Contribute code, documentation, or testing
+- Spread the word to fellow nomads
+- Run a node to help secure the network
+- Create tutorials and guides for the community
+
+*The NomadCoin ecosystem grows through community participation!*
+ 
 ## 🙏 Acknowledgments
 
 - The Rust community for amazing crates

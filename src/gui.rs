@@ -45,22 +45,21 @@ struct NomadCoinApp {
     last_update: DateTime<Utc>,
 }
 
-impl Default for NomadCoinApp {
-    fn default() -> Self {
+impl NomadCoinApp {
+    fn new() -> Self {
         let mut wallet = wallet::Wallet::new();
-        let addr1 = wallet.create_address();
-        let addr2 = wallet.create_address();
         
-        let mut blockchain = blockchain::Blockchain::new();
-        blockchain.create_genesis(10_000_000.0, addr1.address.clone());
+        // Try to load existing mainnet blockchain, otherwise create genesis
+        let (mut blockchain, balance, addresses) = Self::load_or_create_blockchain();
         
         let device = Self::detect_device();
+        let is_mainnet = std::path::Path::new("./mainnet/node1/chaindata").exists();
         
         NomadCoinApp {
             wallet,
-            addresses: vec![addr1, addr2],
-            selected_address: 0,
-            balance: 10_000_000.0,
+            addresses,
+            selected_address: if !addresses.is_empty() { 0 } else { 0 },
+            balance,
             miner_active: false,
             miner_device: device.clone(),
             earnings: 0.0,
@@ -72,7 +71,36 @@ impl Default for NomadCoinApp {
             peer_count: 0,
             current_tab: 0,
             last_update: Utc::now(),
+            mainnet_bootstrap: if is_mainnet { "/ip4/127.0.0.1/tcp/9333/p2p/e076c356ba973b88".to_string() } else { String::new() },
+            is_mainnet,
         }
+    }
+    
+    fn load_or_create_blockchain() -> (blockchain::Blockchain, f64, Vec<WalletAddress>) {
+        // Try to load mainnet blockchain
+        if let Ok(storage) = storage::Storage::new("./mainnet/node1/chaindata") {
+            if let Ok(loaded_blockchain) = storage.load_blockchain() {
+                if let Some(bc) = loaded_blockchain {
+                    // Load addresses from storage (simplified - in reality would load from wallet file)
+                    let mut wallet = wallet::Wallet::new();
+                    let addr1 = wallet.create_address(); // placeholder
+                    let addr2 = wallet.create_address(); // placeholder
+                    let balance = bc.get_balance(&addr1.address); // approximate
+                    return (bc, balance, vec![addr1, addr2]);
+                }
+            }
+        }
+        
+        // Fallback to creating new addresses and genesis
+        let mut wallet = wallet::Wallet::new();
+        let addr1 = wallet.create_address();
+        let addr2 = wallet.create_address();
+        
+        let mut blockchain = blockchain::Blockchain::new();
+        blockchain.create_genesis(10_000_000.0, addr1.address.clone());
+        let balance = blockchain.get_balance(&addr1.address);
+        
+        (blockchain, balance, vec![addr1, addr2])
     }
 }
 

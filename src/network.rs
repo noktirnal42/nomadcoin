@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn, error, debug};
+use rand::Rng;
 
 use crate::types::Transaction;
 
@@ -86,11 +87,14 @@ let server_crypto = rustls::ServerConfig::builder()
          let mut server_config = ServerConfig::with_crypto(Arc::new(server_crypto));
         server_config.transport_config(Arc::new(transport_config));
 
-        let endpoint = Endpoint::server(server_config, addr)?;
-        self.endpoint = Some(endpoint);
-
-        info!("P2P server listening on port {}", port);
-
+let endpoint = Endpoint::server(server_config, addr)?;
+         self.endpoint = Some(endpoint);
+ 
+ let local_addr = self.endpoint.as_ref().unwrap().local_addr()?;
+         let _peer_id = format!("{:x}", rand::random::<u64>());
+         info!("P2P server listening on port {}", port);
+         info!("Peer ID: {}", _peer_id);
+        
         // Accept incoming connections
         let endpoint = self.endpoint.clone().unwrap();
         let tx_sender = self.tx_sender.clone();
