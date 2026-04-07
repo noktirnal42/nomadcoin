@@ -35,6 +35,8 @@ pub struct ConsensusEngine {
     pub mobile_boost: f64,
     pub slash_factor: f64,
     pub block_time_ms: u64,
+    /// Number of blocks required for finality (5 blocks = ~25 seconds)
+    pub finality_blocks: u32,
 }
 
 impl ConsensusEngine {
@@ -48,6 +50,7 @@ impl ConsensusEngine {
             mobile_boost,
             slash_factor: 0.01, // 1% slash for downtime
             block_time_ms: 5000,
+            finality_blocks: 5, // 5 blocks for finality (~25 seconds)
         }
     }
 
@@ -204,6 +207,13 @@ impl ConsensusEngine {
         } else {
             Err("No active consensus round".to_string())
         }
+    }
+
+    /// Check if a block at the given height is finalized
+    /// A block is finalized when finality_blocks confirmations have passed
+    pub fn is_block_finalized(&self, block_height: u64) -> bool {
+        let finalized_height = self.height.saturating_sub(self.finality_blocks as u64);
+        block_height <= finalized_height
     }
 
     /// Slash a validator for misbehavior

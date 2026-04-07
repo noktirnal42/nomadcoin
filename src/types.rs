@@ -29,6 +29,10 @@ pub struct Transaction {
     pub fee: f64,
     pub timestamp: u64,
     pub memo: Option<String>,
+    // Replay protection fields
+    pub nonce: u64,                    // Sequential counter per sender address (prevents replay)
+    pub chain_id: String,              // Chain identifier (prevents cross-chain replay)
+    pub sequence_number: u64,          // Block height at which this tx becomes valid (0 = valid immediately)
 }
 
 /// Block header
@@ -107,7 +111,7 @@ impl Default for NetworkConfig {
             community_allocation: 10_000_000,
             validator_reward: 1_000_000, // Per year
             inflation_rate: 0.05,        // 5% annual
-            confirmations_for_finality: 12,
+            confirmations_for_finality: 5,
             stake_minimum: 100,
             mesh_max_hops: 5,
             mesh_discovery_interval: 300, // seconds

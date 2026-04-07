@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::crypto::{generate_address, generate_keypair, sign_data};
 use crate::types::{Transaction, TxInput, TxOutput, WalletAddress};
@@ -8,6 +9,8 @@ use crate::types::{Transaction, TxInput, TxOutput, WalletAddress};
 pub struct Wallet {
     pub addresses: Vec<WalletAddress>,
     pub transactions: Vec<Transaction>,
+    /// Nonce tracking per address for replay protection
+    pub nonces: HashMap<String, u64>,
 }
 
 impl Wallet {
@@ -16,6 +19,7 @@ impl Wallet {
         Wallet {
             addresses: Vec::new(),
             transactions: Vec::new(),
+            nonces: HashMap::new(),
         }
     }
 
@@ -36,8 +40,8 @@ impl Wallet {
 
     /// Import address from private key
     pub fn import_address(&mut self, private_key: &str) -> Result<WalletAddress, String> {
-        let (_, public_key) = generate_keypair(); // In production, derive from private key
-        let address = generate_address(&public_key);
+        let public_key = crate::crypto::derive_public_key(private_key)?;
+        let address = crate::crypto::generate_address(&public_key);
 
         let wallet_address = WalletAddress {
             public_key,
@@ -72,6 +76,9 @@ impl Wallet {
             .find_address(from_address)
             .ok_or("Address not found in wallet")?;
 
+        // Get current nonce for this address (starts at 0)
+        let nonce = self.nonces.get(from_address).copied().unwrap_or(0);
+
         let tx = Transaction {
             version: 1,
             txid: "pending".to_string(),
@@ -89,6 +96,9 @@ impl Wallet {
             fee,
             timestamp: chrono::Utc::now().timestamp() as u64,
             memo,
+            nonce,                         // Replay protection: sequential nonce
+            chain_id: "nomadcoin".to_string(), // TODO: Load from config
+            sequence_number: 0,            // Valid immediately (no timelock)
         };
 
         Ok(tx)
@@ -122,6 +132,13 @@ impl Wallet {
         let mut tx = self.create_transaction(from_address, to_address, amount, fee, memo)?;
         self.sign_transaction(&mut tx, from_address)?;
         self.transactions.push(tx.clone());
+
+        // Increment nonce for this address after successful signing
+        self.nonces
+            .entry(from_address.to_string())
+            .and_modify(|n| *n += 1)
+            .or_insert(1);
+
         Ok(tx)
     }
 

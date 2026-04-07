@@ -6,6 +6,8 @@ use std::collections::HashMap;
 pub struct Blockchain {
     pub state: ChainState,
     pub height: u64,
+    /// Track nonces per address for replay protection
+    pub address_nonces: HashMap<String, u64>,
 }
 
 impl Blockchain {
@@ -19,6 +21,7 @@ impl Blockchain {
                 validators: HashMap::new(),
             },
             height: 0,
+            address_nonces: HashMap::new(),
         }
     }
 
@@ -36,6 +39,9 @@ impl Blockchain {
             fee: 0.0,
             timestamp: 0,
             memo: Some("Genesis block - community allocation".to_string()),
+            nonce: 0,
+            chain_id: "nomadcoin".to_string(),
+            sequence_number: 0,
         };
 
         let genesis_block = Block {
@@ -63,8 +69,24 @@ impl Blockchain {
         tracing::info!("Genesis block created with {} NOMAD", community_allocation);
     }
 
-    /// Validate transaction
+    /// Validate transaction with replay protection
     pub fn validate_transaction(&self, tx: &Transaction) -> Result<(), String> {
+        // Validate chain_id matches (prevent cross-chain replays)
+        if tx.chain_id != "nomadcoin" {
+            return Err(format!(
+                "Invalid chain_id: {} (expected nomadcoin)",
+                tx.chain_id
+            ));
+        }
+
+        // Validate sequence_number (transaction becomes valid at specified block height)
+        if tx.sequence_number > self.height {
+            return Err(format!(
+                "Transaction sequence number {} is in the future (current height: {})",
+                tx.sequence_number, self.height
+            ));
+        }
+
         // Check inputs exist and have sufficient balance
         for input in &tx.inputs {
             let balance = self.state.balances.get(&input.txid).unwrap_or(&0.0);
@@ -79,6 +101,19 @@ impl Blockchain {
         // Check fee is sufficient
         if tx.fee < 0.001 {
             return Err("Insufficient fee: minimum 0.001 NOMAD".to_string());
+        }
+
+        // Validate nonce is sequential (prevent replay attacks)
+        // Get sender from first input (the payer)
+        if let Some(first_input) = tx.inputs.first() {
+            let sender = &first_input.txid;
+            let expected_nonce = self.address_nonces.get(sender).copied().unwrap_or(0);
+            if tx.nonce != expected_nonce {
+                return Err(format!(
+                    "Invalid nonce for {}: {} (expected {})",
+                    sender, tx.nonce, expected_nonce
+                ));
+            }
         }
 
         // Verify signatures
@@ -126,7 +161,7 @@ impl Blockchain {
             validator_signatures: vec![],
         };
 
-        // Update balances
+        // Update balances and increment nonces
         for tx in &new_block.transactions {
             for input in &tx.inputs {
                 let balance = self.state.balances.entry(input.txid.clone()).or_insert(0.0);
@@ -139,6 +174,14 @@ impl Blockchain {
                     .entry(output.address.clone())
                     .or_insert(0.0);
                 *balance += output.amount;
+            }
+            // Increment nonce for each transaction's sender
+            if !tx.inputs.is_empty() {
+                let sender = tx.inputs[0].txid.clone();
+                self.address_nonces
+                    .entry(sender)
+                    .and_modify(|n| *n += 1)
+                    .or_insert(1);
             }
         }
 
