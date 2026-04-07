@@ -1,4 +1,5 @@
 pub mod blockchain;
+pub mod config;
 pub mod consensus;
 pub mod crypto;
 pub mod mesh;
@@ -7,6 +8,7 @@ pub mod network;
 pub mod storage;
 pub mod types;
 pub mod wallet;
+pub mod wallet_persistence;
 
 use clap::Parser;
 use tracing_subscriber;
@@ -66,6 +68,9 @@ enum Commands {
         /// Continue mining indefinitely
         #[arg(long, short, default_value_t = false)]
         continuous: bool,
+        /// Data directory for syncing rewards
+        #[arg(long, default_value = "~/.nomadcoin")]
+        data_dir: String,
     },
     /// Run a full node
     Node {
@@ -78,6 +83,18 @@ enum Commands {
         /// Peer addresses to connect to
         #[arg(long)]
         peers: Vec<String>,
+        /// Bootstrap node address
+        #[arg(long)]
+        bootstrap: Option<String>,
+    },
+    /// Import a wallet from a private key
+    Import {
+        /// Private key (64 hex characters)
+        #[arg(long)]
+        key: String,
+        /// Number of addresses to derive (usually 1)
+        #[arg(short, long, default_value_t = 1)]
+        count: u32,
     },
     /// Register as a validator
     RegisterValidator {
@@ -136,15 +153,23 @@ fn main() {
         } => {
             run_init(&chain_id, allocation, &data_dir);
         }
-        Commands::Mine { address, device, continuous } => {
-            run_mine(&address, &device, continuous);
+        Commands::Mine { address, device, continuous, data_dir } => {
+            run_mine(&address, &device, continuous, &data_dir);
         }
         Commands::Node {
             port,
             data_dir,
             peers,
+            bootstrap,
         } => {
-            run_node(port, &data_dir, &peers);
+            let mut all_peers = peers.clone();
+            if let Some(b) = bootstrap {
+                all_peers.push(b);
+            }
+            run_node(port, &data_dir, &all_peers);
+        }
+        Commands::Import { key, count } => {
+            run_import(&key, count);
         }
         Commands::RegisterValidator {
             address,
@@ -178,6 +203,34 @@ fn run_wallet(count: u32) {
     }
 
     println!("✅ Generated {} address(es)", count);
+}
+
+fn run_import(key: &str, count: u32) {
+    println!("🔑 NomadCoin Wallet Import");
+    println!("=========================\n");
+
+    if key.len() != 64 || !key.chars().all(|c| c.is_ascii_hexdigit()) {
+        eprintln!("❌ Invalid private key: Must be 64 hex characters");
+        return;
+    }
+
+    let mut wallet = wallet::Wallet::new();
+    match wallet.import_address(key) {
+        Ok(addr) => {
+            println!("✅ Wallet successfully imported!");
+            println!("  Address:    {}", addr.address);
+            println!("  Public Key: {}", addr.public_key);
+            println!("  Private Key: {}", addr.private_key);
+
+            if count > 1 {
+                println!("\n⚠️  Note: Only the primary address was derived from the provided key.");
+                println!("   NomadCoin currently supports 1:1 key-to-address mapping.");
+            }
+        }
+        Err(e) => {
+            eprintln!("❌ Import failed: {}", e);
+        }
+    }
 }
 
 fn run_send(from: &str, to: &str, amount: f64, fee: f64) {
@@ -257,7 +310,7 @@ fn run_init(chain_id: &str, allocation: f64, data_dir: &str) {
     println!("  Data Directory:        {}", path);
 }
 
-fn run_mine(address: &str, device: &str, continuous: bool) {
+fn run_mine(address: &str, device: &str, continuous: bool, data_dir: &str) {
     println!("⛏️  NomadCoin Mobile Miner");
     println!("========================\n");
 
