@@ -195,8 +195,12 @@ impl NomadCoinApp {
             ui.heading(format!("{:.4} NOMAD", self.balance));
         });
 
-        ui.label("Your Addresses:");
-        for (i, addr) in self.addresses.iter().enumerate() {
+        // Scrollable content area
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                ui.label("Your Addresses:");
+                for (i, addr) in self.addresses.iter().enumerate() {
             ui.horizontal(|ui| {
                 let label = if self.selected_address == i {
                     format!("✓ #{}", i + 1)
@@ -247,11 +251,16 @@ impl NomadCoinApp {
                     }
                 });
             }
-        }
+                }
+            });
 
+        // Actions area (outside scroll for always visible)
         ui.separator();
         ui.label("Actions:");
-        ui.horizontal(|ui| {
+
+        // Show buttons stacked if not enough horizontal space
+        if ui.available_width() < 250.0 {
+            // Vertical layout for small screens
             if ui.button("➕ New Address").clicked() {
                 let new_addr = self.wallet.create_address();
                 self.addresses.push(new_addr);
@@ -259,7 +268,18 @@ impl NomadCoinApp {
             if ui.button("📥 Import Key").clicked() {
                 self.show_import_dialog = true;
             }
-        });
+        } else {
+            // Horizontal layout for wider screens
+            ui.horizontal(|ui| {
+                if ui.button("➕ New Address").clicked() {
+                    let new_addr = self.wallet.create_address();
+                    self.addresses.push(new_addr);
+                }
+                if ui.button("📥 Import Key").clicked() {
+                    self.show_import_dialog = true;
+                }
+            });
+        }
 
         // Import dialog - using egui window pattern
         if self.show_import_dialog {
@@ -311,10 +331,10 @@ impl NomadCoinApp {
     
     fn miner_tab(&mut self, ui: &mut egui::Ui) {
         ui.heading("⛏️ Miner");
-        
+
         let device = Self::detect_device();
         let boost = Self::get_boost(&device);
-        
+
         ui.horizontal(|ui| {
             ui.label("Status:");
             ui.colored_label(
@@ -322,9 +342,9 @@ impl NomadCoinApp {
                 if self.miner_active { "Active" } else { "Idle" }
             );
         });
-        
+
         ui.label(format!("Device: {} (auto)", device));
-        
+
         ui.horizontal(|ui| {
             ui.label("Boost:");
             if boost > 1.0 {
@@ -333,27 +353,35 @@ impl NomadCoinApp {
                 ui.colored_label(egui::Color32::GRAY, format!("{:.1}x", boost));
             }
         });
-        
+
         ui.horizontal(|ui| {
             ui.label("Earnings:");
             ui.heading(format!("{:.4} NOMAD", self.earnings));
         });
-        
+
         ui.horizontal(|ui| {
             ui.label("Validations:");
             ui.label(format!("{}", self.validations));
         });
-        
-        if ui.button(if self.miner_active { "⏹ Stop" } else { "▶ Start" }).clicked() {
+
+        // Start/Stop button
+        if ui.button(if self.miner_active { "⏹ Stop Mining" } else { "▶ Start Mining" }).clicked() {
             self.miner_active = !self.miner_active;
-            if self.miner_active {
-                self.earnings += 0.01 * boost;
+        }
+
+        // Continuous mining while active
+        if self.miner_active {
+            // Simulate mining: earn NOMAD and validations each frame
+            self.earnings += 0.001 * boost;  // Smaller increment per frame
+            if self.earnings % 0.1 < 0.002 {  // Validation every ~0.1 NOMAD
                 self.validations += 1;
             }
+            ui.ctx().request_repaint();  // Keep updating
         }
-        
+
         ui.separator();
         ui.label("💡 Mobile hotspot = 1.5x bonus!");
+        ui.label("Mining status: continuously running while active");
     }
     
     fn send_tab(&mut self, ui: &mut egui::Ui) {
