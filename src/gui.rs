@@ -151,9 +151,9 @@ impl eframe::App for NomadCoinApp {
                 ui.label(format!("{} ({:.1}x)", device, boost));
                 ui.separator();
                 if self.is_mainnet {
-                    ui.colored_label(egui::Color32::RED, "🔴 MAINNET");
+                    ui.colored_label(egui::Color32::RED, "[MAINNET]");
                 } else {
-                    ui.colored_label(egui::Color32::YELLOW, "🟡 TESTNET");
+                    ui.colored_label(egui::Color32::YELLOW, "[TESTNET]");
                 }
                 ui.separator();
                 if self.miner_active {
@@ -204,6 +204,7 @@ impl NomadCoinApp {
         // Scrollable content area
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
+            .scroll_bar_visibility(egui::containers::scroll_area::ScrollBarVisibility::AlwaysVisible)
             .show(ui, |ui| {
                 ui.label("Your Addresses:");
                 for (i, addr) in self.addresses.iter().enumerate() {
@@ -235,12 +236,28 @@ impl NomadCoinApp {
                 }
 
                 ui.separator();
-                ui.label("💡 Desktop: Use copy button above");
-                ui.label("📱 Mobile: Use QR code to receive coins");
+                ui.label("Desktop: Use copy button above");
+                ui.label("Mobile: Use QR code to receive coins");
 
-                // QR code generation for mobile apps
-                let _ = qrcode::QrCode::new(&addr.address);
-                ui.label("(QR codes available on iOS/Android apps)");
+                // QR code generation and rendering
+                if let Ok(qr_code) = qrcode::QrCode::new(&addr.address) {
+                    let image = qr_code.render::<char>()
+                        .min_dimensions(21, 21)
+                        .light_color(' ')
+                        .dark_color('█')
+                        .build();
+
+                    ui.separator();
+                    ui.label("QR Code (scan with mobile):");
+                    // Render QR code with monospace font in white frame
+                    egui::Frame::group(ui.style())
+                        .fill(egui::Color32::WHITE)
+                        .inner_margin(8.0)
+                        .show(ui, |ui| {
+                            ui.label(egui::RichText::new(image)
+                                .font(egui::FontId::monospace(8.0)));
+                        });
+                }
             }
                 }
             });
@@ -457,8 +474,8 @@ fn truncate(s: &str, len: usize) -> String {
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([380.0, 700.0])
-            .with_min_inner_size([300.0, 500.0])
+            .with_inner_size([520.0, 700.0])
+            .with_min_inner_size([400.0, 500.0])
             .with_title("NomadCoin"),
         ..Default::default()
     };

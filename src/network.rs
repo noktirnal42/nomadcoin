@@ -71,13 +71,16 @@ impl P2PNetwork {
         let cert_der = cert.serialize_der()?;
         let priv_key = cert.serialize_private_key_der();
 
-let server_crypto = rustls::ServerConfig::builder()
+let mut server_crypto = rustls::ServerConfig::builder()
              .with_safe_defaults()
              .with_no_client_auth()
              .with_single_cert(
                  vec![rustls::Certificate(cert_der)],
                  rustls::PrivateKey(priv_key),
              )?;
+
+         // Configure ALPN to match client expectations
+         server_crypto.alpn_protocols = vec![b"nomadcoin".to_vec()];
 
          let mut transport_config = TransportConfig::default();
          transport_config.max_concurrent_bidi_streams(VarInt::from(100u32));
