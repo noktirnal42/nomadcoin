@@ -79,6 +79,7 @@ impl NomadCoinApp {
             peer_count: 0,
             current_tab: 0,
             last_update: Utc::now(),
+            mainnet_boost: "1.0x".to_string(),
             mainnet_bootstrap: if is_mainnet { "/ip4/127.0.0.1/tcp/9333/p2p/e076c356ba973b88".to_string() } else { String::new() },
             is_mainnet,
             show_import_dialog: false,
@@ -97,7 +98,7 @@ impl NomadCoinApp {
             if let Ok(loaded_blockchain) = storage.load_blockchain() {
                 if let Some(bc) = loaded_blockchain {
                     // Load addresses from storage (simplified - in reality would load from wallet file)
-                    let wallet = wallet::Wallet::new();
+                    let mut wallet = wallet::Wallet::new();
                     let addr1 = wallet.create_address(); // placeholder
                     let addr2 = wallet.create_address(); // placeholder
                     let balance = bc.get_balance(&addr1.address); // approximate
@@ -105,16 +106,16 @@ impl NomadCoinApp {
                 }
             }
         }
-        
+
         // Fallback to creating new addresses and genesis
-        let wallet = wallet::Wallet::new();
+        let mut wallet = wallet::Wallet::new();
         let addr1 = wallet.create_address();
         let addr2 = wallet.create_address();
-        
+
         let mut blockchain = blockchain::Blockchain::new();
         blockchain.create_genesis(10_000_000.0, addr1.address.clone());
         let balance = blockchain.get_balance(&addr1.address);
-        
+
         (blockchain, balance, vec![addr1, addr2])
     }
     
@@ -188,12 +189,12 @@ impl eframe::App for NomadCoinApp {
 impl NomadCoinApp {
     fn wallet_tab(&mut self, ui: &mut egui::Ui) {
         ui.heading("💳 Wallet");
-        
+
         ui.horizontal(|ui| {
             ui.label("Balance:");
             ui.heading(format!("{:.4} NOMAD", self.balance));
         });
-        
+
         ui.label("Your Addresses:");
         for (i, addr) in self.addresses.iter().enumerate() {
             ui.horizontal(|ui| {
@@ -206,69 +207,70 @@ impl NomadCoinApp {
                     self.selected_address = i;
                 }
                 ui.label(truncate(&addr.address, 24));
-                
+
                 if ui.button("📋").clicked() {
                     ui.output_mut(|o| o.copied_text = addr.address.clone());
                 }
             });
-            
+
             // Show QR code (real implementation)
             if self.selected_address == i {
                 ui.separator();
                 ui.label("📱 Receive Address:");
                 ui.label(truncate(&addr.address, 32));
 
-                // TODO: Implement real QR code generation
-                // The qrcode crate is available for generating QR codes
-                // For now: Show improved text representation
-                ui.label("QR Code (enhanced visual):");
+                ui.label("QR Code:");
 
-                // Generate better visual encoding from address
-                let hash = crypto::hash_data(addr.address.as_bytes());
-                let hash_bytes: Vec<u8> = hash.chars().take(32).map(|c| c as u8).collect();
+                // Generate real QR code from address
+                if let Ok(qr_code) = qrcode::QrCode::new(&addr.address) {
+                    let image = qr_code.render::<char>()
+                        .min_dimensions(21, 21)
+                        .light_color(' ')
+                        .dark_color('█')
+                        .build();
 
-                // 21x21 QR-like pattern (standard QR version 1)
-                for (row_idx, row) in (0..21).enumerate() {
-                    let mut pattern = String::new();
-                    for col_idx in 0..21 {
-                        let idx = (row_idx * 21 + col_idx) % hash_bytes.len();
-                        let byte = hash_bytes[idx];
-                        // Create more QR-like pattern
-                        if (row_idx < 7 && col_idx < 7) || // Top-left finder pattern
-                           (row_idx < 7 && col_idx >= 14) || // Top-right finder pattern
-                           (row_idx >= 14 && col_idx < 7) {   // Bottom-left finder pattern
-                            pattern.push('█'); // Finder patterns
-                        } else if byte % 3 == 0 {
-                            pattern.push('█');
-                        } else {
-                            pattern.push(' ');
-                        }
+                    // Split into lines for display
+                    let lines: Vec<&str> = image.lines().collect();
+                    for line in lines {
+                        ui.label(line);
                     }
-                    ui.label(pattern);
+                } else {
+                    // Fallback if QR code generation fails
+                    ui.label("(QR code generation failed)");
+                    ui.label("📋 Copy address below:");
                 }
 
-                ui.label("⚠️ Scan with QR reader or copy address");
+                ui.horizontal(|ui| {
+                    ui.label("Address:");
+                    if ui.button("📋 Copy").clicked() {
+                        ui.output_mut(|o| o.copied_text = addr.address.clone());
+                    }
+                });
             }
         }
-        
+
+        ui.separator();
+        ui.label("Actions:");
         ui.horizontal(|ui| {
-            if ui.button("+ New Address").clicked() {
+            if ui.button("➕ New Address").clicked() {
                 let new_addr = self.wallet.create_address();
                 self.addresses.push(new_addr);
             }
-            if ui.button("🔑 Import").clicked() {
+            if ui.button("📥 Import Key").clicked() {
                 self.show_import_dialog = true;
             }
         });
-        
-        // Import dialog
+
+        // Import dialog - using egui window pattern
         if self.show_import_dialog {
-            ui.modal(|ui| {
-                ui.vertical(|ui| {
-                    ui.heading("🔑 Import Wallet");
+            egui::Window::new("🔑 Import Wallet")
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .resizable(false)
+                .collapsible(false)
+                .show(ui.ctx(), |ui| {
                     ui.label("Enter your private key (64 hex characters):");
                     ui.text_edit_singleline(&mut self.import_key);
-                    
+
                     ui.horizontal(|ui| {
                         if ui.button("Cancel").clicked() {
                             self.show_import_dialog = false;
@@ -299,12 +301,11 @@ impl NomadCoinApp {
                             }
                         }
                     });
-                    
+
                     if !self.import_error.is_empty() {
                         ui.colored_label(egui::Color32::RED, &self.import_error);
                     }
                 });
-            });
         }
     }
     
@@ -438,7 +439,7 @@ fn truncate(s: &str, len: usize) -> String {
     }
 }
 
-fn main() -> efs::Result<()> {
+fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([380.0, 600.0])
@@ -446,7 +447,7 @@ fn main() -> efs::Result<()> {
             .with_title("NomadCoin"),
         ..Default::default()
     };
-    
+
     eframe::run_native(
         "NomadCoin",
         options,

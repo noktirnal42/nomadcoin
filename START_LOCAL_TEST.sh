@@ -33,10 +33,10 @@ echo ""
 if [ ! -d "$NODE1_DIR/chaindata" ]; then
     echo "📦 Initializing blockchain for node1..."
     "$BINARY" init \
-        --chain_id nomadcoin-dev-1 \
+        --chain-id nomadcoin-dev-1 \
         --allocation 10000000 \
         --address nomad1community0000000000000000000000000 \
-        --data_dir "$NODE1_DIR"
+        --data-dir "$NODE1_DIR"
     echo "✅ Blockchain initialized"
 fi
 
@@ -46,11 +46,11 @@ echo ""
 echo "You will need to open 3 terminal windows:"
 echo ""
 echo "┌─ Terminal 1 (Node 1 - Primary) ─────────────────────────"
-echo "│ $BINARY node --port 9333 --data_dir $NODE1_DIR"
+echo "│ $BINARY node --port 9333 --data-dir $NODE1_DIR"
 echo "├─ Terminal 2 (Node 2) ──────────────────────────────────"
-echo "│ $BINARY node --port 9334 --bootstrap /ip4/127.0.0.1/tcp/9333 --data_dir $NODE2_DIR"
+echo "│ $BINARY node --port 9334 --bootstrap /ip4/127.0.0.1/tcp/9333 --data-dir $NODE2_DIR"
 echo "├─ Terminal 3 (Node 3) ──────────────────────────────────"
-echo "│ $BINARY node --port 9335 --bootstrap /ip4/127.0.0.1/tcp/9333 --data_dir $NODE3_DIR"
+echo "│ $BINARY node --port 9335 --bootstrap /ip4/127.0.0.1/tcp/9333 --data-dir $NODE3_DIR"
 echo "└─ Terminal 4 (Testing) ─────────────────────────────────"
 echo "│ Run wallet tests (see LOCAL_TESTING_GUIDE.md)"
 echo "└─────────────────────────────────────────────────────────"
@@ -64,17 +64,17 @@ if [[ "$response" =~ ^[Yy]$ ]]; then
     echo "Starting Node 1..."
     echo "Press Ctrl+C to stop"
     echo ""
-    "$BINARY" node --port 9333 --data_dir "$NODE1_DIR"
+    "$BINARY" node --port 9333 --data-dir "$NODE1_DIR"
 else
     echo ""
     echo "Ready to start testing! Copy and paste these commands in separate terminals:"
     echo ""
     echo "# Terminal 1"
-    echo "$BINARY node --port 9333 --data_dir $NODE1_DIR"
+    echo "$BINARY node --port 9333 --data-dir $NODE1_DIR"
     echo ""
     echo "# Terminal 2"
-    echo "$BINARY node --port 9334 --bootstrap /ip4/127.0.0.1/tcp/9333 --data_dir $NODE2_DIR"
+    echo "$BINARY node --port 9334 --bootstrap /ip4/127.0.0.1/tcp/9333 --data-dir $NODE2_DIR"
     echo ""
     echo "# Terminal 3"
-    echo "$BINARY node --port 9335 --bootstrap /ip4/127.0.0.1/tcp/9333 --data_dir $NODE3_DIR"
+    echo "$BINARY node --port 9335 --bootstrap /ip4/127.0.0.1/tcp/9333 --data-dir $NODE3_DIR"
 fi
