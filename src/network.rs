@@ -155,7 +155,7 @@ let mut buf = Vec::new();
                                 let _ = _tx_sender.send(transaction).await;
                             }
                         }
-                        P2PMessage::NewBlock { block, height } => {
+                        P2PMessage::NewBlock { block: _, height } => {
                             info!("Received new block {} from {}", height, peer_addr);
                             // In production, verify and add block to blockchain
                         }
@@ -211,7 +211,7 @@ let mut buf = Vec::new();
         };
 
         let msg = P2PMessage::NewTransaction { tx: tx_bytes };
-        let msg_bytes = match serde_json::to_vec(&msg) {
+        let _msg_bytes = match serde_json::to_vec(&msg) {
             Ok(b) => b,
             Err(e) => {
                 error!("Failed to serialize message: {}", e);
@@ -233,7 +233,7 @@ let mut buf = Vec::new();
             height,
         };
 
-        let msg_bytes = match serde_json::to_vec(&msg) {
+        let _msg_bytes = match serde_json::to_vec(&msg) {
             Ok(b) => b,
             Err(e) => {
                 error!("Failed to serialize block message: {}", e);

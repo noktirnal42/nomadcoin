@@ -1,12 +1,12 @@
-# 📚 NomadCoin Documentation
+# NomadCoin
 
-> Complete documentation for the NomadCoin ecosystem
+A mobile-first cryptocurrency designed for the nomadic community - digital nomads, travelers, remote workers, and anyone who needs financial sovereignty while moving freely.
 
-![NomadCoin](https://img.shields.io/badge/NOMAD-Cryptocurrency-00BCD4)
-![License](https://img.shields.io/badge/License-MIT-7C4DFF)
-![Status](https://img.shields.io/badge/Status-v0.1.0%20Release-4CAF50)
+![NomadCoin](https://img.shields.io/badge/NOMAD-Cryptocurrency-blue)
+![License](https://img.shields.io/badge/License-MIT-green)
+![Status](https://img.shields.io/badge/Status-Development%20Phase-green)
 ![Build](https://img.shields.io/badge/Build-Passing-brightgreen)
-![Tests](https://img.shields.io/badge/Tests-44%20Passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-26%20Passing-brightgreen)
 
 ---
 

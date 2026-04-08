@@ -1,8 +1,6 @@
-use crate::types::WalletAddress;
 use crate::wallet::Wallet;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 /// Encrypted wallet file structure
@@ -44,7 +42,7 @@ pub struct WalletMetadata {
 pub fn save_wallet<P: AsRef<Path>>(
     wallet: &Wallet,
     path: P,
-    password: &str,
+    _password: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // For now: Simple JSON save with file permissions
     // TODO: Implement proper AES-256-GCM encryption with PBKDF2
@@ -95,7 +93,7 @@ pub fn load_wallet<P: AsRef<Path>>(
 /// Returns a string suitable for secure transmission or printing
 pub fn export_wallet_backup(
     wallet: &Wallet,
-    password: &str,
+    _password: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     // Create backup format with:
     // - Encrypted wallet data

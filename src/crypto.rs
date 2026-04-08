@@ -58,6 +58,17 @@ pub fn generate_address(public_key: &str) -> String {
     format!("nomad1{}", &hash[..38])
 }
 
+/// Derive public key from private key
+pub fn derive_public_key(private_key_hex: &str) -> Result<String, String> {
+    let bytes = hex::decode(private_key_hex).map_err(|e| e.to_string())?;
+    let signing_key = SigningKey::from_bytes(
+        bytes.as_slice().try_into().map_err(|_| "Invalid key length".to_string())?,
+    );
+    let verifying_key = signing_key.verifying_key();
+    Ok(hex::encode(verifying_key.to_bytes()))
+}
+
+
 /// Create a deterministic keypair from a seed phrase (simplified)
 pub fn keypair_from_seed(seed: &str) -> (String, String) {
     // In production, use BIP39/BIP32 derivation

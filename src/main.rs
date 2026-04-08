@@ -53,6 +53,9 @@ enum Commands {
         /// Community allocation amount
         #[arg(long, default_value_t = 10_000_000.0)]
         allocation: f64,
+        /// Address to receive the allocation
+        #[arg(long)]
+        address: String,
         /// Data directory
         #[arg(long, default_value = "~/.nomadcoin")]
         data_dir: String,
@@ -111,6 +114,30 @@ enum Commands {
         #[arg(long, default_value = "~/.nomadcoin")]
         data_dir: String,
     },
+    /// Get balance for an address
+    Balance {
+        /// Wallet address
+        #[arg(long)]
+        address: String,
+        /// Data directory to load blockchain from
+        #[arg(long, default_value = "~/.nomadcoin")]
+        data_dir: String,
+    },
+    /// Get transaction details
+    Transaction {
+        /// Transaction ID
+        #[arg(long)]
+        txid: String,
+        /// Data directory to load blockchain from
+        #[arg(long, default_value = "~/.nomadcoin")]
+        data_dir: String,
+    },
+    /// List all active validators
+    Validators {
+        /// Data directory to load blockchain from
+        #[arg(long, default_value = "~/.nomadcoin")]
+        data_dir: String,
+    },
     /// Show node status
     Status {
         /// Data directory
@@ -149,9 +176,10 @@ fn main() {
         Commands::Init {
             chain_id,
             allocation,
+            address,
             data_dir,
         } => {
-            run_init(&chain_id, allocation, &data_dir);
+            run_init(&chain_id, allocation, &address, &data_dir);
         }
         Commands::Mine { address, device, continuous, data_dir } => {
             run_mine(&address, &device, continuous, &data_dir);
@@ -178,6 +206,15 @@ fn main() {
             data_dir,
         } => {
             run_register_validator(&address, stake, mobile, &data_dir);
+        }
+        Commands::Balance { address, data_dir } => {
+            run_balance(&address, &data_dir);
+        }
+        Commands::Transaction { txid, data_dir } => {
+            run_transaction_info(&txid, &data_dir);
+        }
+        Commands::Validators { data_dir } => {
+            run_list_validators(&data_dir);
         }
         Commands::Status { data_dir } => {
             run_status(&data_dir);
@@ -268,7 +305,7 @@ fn run_send(from: &str, to: &str, amount: f64, fee: f64) {
     }
 }
 
-fn run_init(chain_id: &str, allocation: f64, data_dir: &str) {
+fn run_init(chain_id: &str, allocation: f64, address: &str, data_dir: &str) {
     println!("🌐 NomadCoin Blockchain Initialization");
     println!("=====================================\n");
 
@@ -283,9 +320,9 @@ fn run_init(chain_id: &str, allocation: f64, data_dir: &str) {
 
     // Initialize blockchain
     let mut blockchain = blockchain::Blockchain::new();
-    let community_address = "nomad1community0000000000000000000000000".to_string();
 
-    blockchain.create_genesis(allocation, community_address.clone());
+    // Use the provided address for genesis allocation
+    blockchain.create_genesis(allocation, address.to_string());
 
     // Save to database
     storage
@@ -301,7 +338,7 @@ fn run_init(chain_id: &str, allocation: f64, data_dir: &str) {
     println!("✅ Blockchain Initialized!");
     println!("  Chain ID:              {}", chain_id);
     println!("  Community Allocation:  {} NOMAD", allocation);
-    println!("  Community Address:     {}", community_address);
+    println!("  Community Address:     {}", address);
     println!("  Genesis Block Height:  {}", blockchain.height());
     println!(
         "  Genesis TX Count:      {}",
@@ -313,6 +350,19 @@ fn run_init(chain_id: &str, allocation: f64, data_dir: &str) {
 fn run_mine(address: &str, device: &str, continuous: bool, data_dir: &str) {
     println!("⛏️  NomadCoin Mobile Miner");
     println!("========================\n");
+
+    // Load blockchain for syncing
+    let path = expand_path(data_dir);
+    let db_path = format!("{}/chaindata", path);
+    let storage = storage::Storage::new(&db_path).expect("Failed to open database");
+    let mut blockchain = match storage.load_blockchain().expect("Failed to load blockchain") {
+        Some(bc) => bc,
+        None => {
+            let mut bc = blockchain::Blockchain::new();
+            bc.create_genesis(10_000_000.0, "nomad1community0000000000000000000000000".to_string());
+            bc
+        }
+    };
 
     let mut miner = miner::MinerService::new(address.to_string(), device.to_string());
     miner.start_mining();
@@ -366,7 +416,7 @@ fn run_mine(address: &str, device: &str, continuous: bool, data_dir: &str) {
         println!("  Mobile Boost:    {:.1}x", stats.mobile_boost_multiplier);
 
         // Sync
-        let synced = miner.sync_with_network();
+        let synced = miner.sync_with_network(&mut blockchain);
         println!("  Synced:          {} validations", synced);
     }
 }
@@ -574,6 +624,98 @@ fn run_status(data_dir: &str) {
             println!();
             println!("  Run 'nomadcoin-core init' to initialize");
         }
+    }
+}
+
+fn run_balance(address: &str, data_dir: &str) {
+    println!("💰 NomadCoin Balance Checker");
+    println!("=========================\n");
+
+    let path = expand_path(data_dir);
+    let db_path = format!("{}/chaindata", path);
+    let storage = storage::Storage::new(&db_path).expect("Failed to open database");
+
+    let blockchain = match storage.load_blockchain().expect("Failed to load blockchain") {
+        Some(bc) => bc,
+        None => {
+            println!("Error: No blockchain found in data directory. Run 'init' first.");
+            return;
+        }
+    };
+
+    let balance = blockchain.get_balance(address);
+    println!("\nBalance for {}:", address);
+    println!("  {:.4} NOMAD", balance);
+}
+
+fn run_transaction_info(txid: &str, data_dir: &str) {
+    println!("📄 Transaction Info");
+    println!("==================\n");
+
+    let path = expand_path(data_dir);
+    let db_path = format!("{}/chaindata", path);
+    let storage = storage::Storage::new(&db_path).expect("Failed to open database");
+
+    let blockchain = match storage.load_blockchain().expect("Failed to load blockchain") {
+        Some(bc) => bc,
+        None => {
+            println!("Error: No blockchain found in data directory.");
+            return;
+        }
+    };
+
+    let mut found = false;
+    for block in &blockchain.state.blocks {
+        for tx in &block.transactions {
+            if tx.txid == txid {
+                println!("Transaction found!");
+                println!("  TXID:     {}", tx.txid);
+                println!("  Amount:   {:.4} NOMAD", tx.outputs[0].amount);
+                println!("  Recipient: {}", tx.outputs[0].address);
+                println!("  Timestamp: {}", tx.timestamp);
+                println!("  Memo:     {}", tx.memo.as_deref().unwrap_or("None"));
+
+                let confirmations = blockchain.height() - (blockchain.state.blocks.iter().position(|b| b.transactions.iter().any(|t| t.txid == txid)).unwrap_or(0) as u64 + 1);
+                println!("  Confirmations: {}", confirmations);
+
+                found = true;
+                break;
+            }
+        }
+        if found { break; }
+    }
+
+    if !found {
+        println!("Transaction {} not found in the blockchain.", txid);
+    }
+}
+
+fn run_list_validators(data_dir: &str) {
+    println!("🛡️  Active Validators");
+    println!("==================\n");
+
+    let path = expand_path(data_dir);
+    let db_path = format!("{}/chaindata", path);
+    let storage = storage::Storage::new(&db_path).expect("Failed to open database");
+
+    let blockchain = match storage.load_blockchain().expect("Failed to load blockchain") {
+        Some(bc) => bc,
+        None => {
+            println!("Error: No blockchain found.");
+            return;
+        }
+    };
+
+    if blockchain.state.validators.is_empty() {
+        println!("No registered validators found.");
+        return;
+    }
+
+    println!("{:<32} {:<15} {:<10}", "Address", "Stake", "Boost");
+    println!("{:-<60}", "");
+
+    for (addr, stake) in &blockchain.state.validators {
+        println!("{:<32} {:<15.2} {:<10}", addr, stake, "1.0x");
     }
 }
 
