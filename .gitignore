@@ -45,3 +45,13 @@ mobile/nomadcoin_miner/.flutter-plugins-dependencies
 .env
 *.key
 *.pem
+# Build artifacts
+cross_build.log
+
+# Local node chaindata
+mainnet/*/chaindata/
+mainnet/*/wallet*.json
+
+# IDE/editor
+.vscode/
+.idea/

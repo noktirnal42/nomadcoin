@@ -1,0 +1,20 @@
+{
+  "chain_id": "nomadcoin-mainnet-1",
+  "block_time_ms": 5000,
+  "max_tx_per_block": 1000,
+  "max_block_size": 2000000,
+  "total_supply": 100000000,
+  "community_allocation": 10000000,
+  "validator_reward": 1000000,
+  "inflation_rate": 0.05,
+  "confirmations_for_finality": 5,
+  "stake_minimum": 100,
+  "mesh_max_hops": 5,
+  "mesh_discovery_interval": 300,
+  "offline_tx_validity": 86400,
+  "bootstrap_peers": [
+    "127.0.0.1:9333",
+    "127.0.0.1:9334",
+    "127.0.0.1:9335"
+  ]
+}

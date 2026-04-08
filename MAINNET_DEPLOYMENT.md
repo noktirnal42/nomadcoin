@@ -1,251 +1,104 @@
 # NomadCoin Mainnet Deployment Guide
 
-## Pre-Deployment Checklist
+## Overview
 
-### Security (CRITICAL - Must Complete)
-- [x] TLS certificate verification implemented (proper validation, not bypassed)
-- [x] Replay attack protection (nonce, chain_id, sequence_number)
-- [x] Finality window implemented (5 blocks = ~25 seconds)
-- [x] Bootstrap peer configuration externalized (not hardcoded)
-- [x] Private keys not logged or exposed in output
-- [x] Wallet files encrypted with password protection
-- [x] Configuration validation enforced at startup
+This guide covers deploying NomadCoin to a Raspberry Pi 3 mainnet cluster. The deployment consists of:
 
-### Features (REQUIRED for MVP)
-- [x] Wallet import via CLI and GUI
-- [x] Address generation and key derivation
-- [x] Transaction signing and verification
-- [x] Block creation and consensus
-- [x] Balance tracking per address
-- [x] QR code display for receiving addresses
-- [x] Mobile mining support with boost factor
-- [x] Mesh network framework (offline support ready)
+1. **Building** the binary (native ARMv7 on Raspberry Pi)
+2. **Testing** locally on macOS with a 3-node cluster
+3. **Deploying** to Raspberry Pi mainnet
+4. **Verifying** cluster consensus and finality
 
-### Testing (RECOMMENDED)
-- [ ] Unit tests all pass: `cargo test`
-- [ ] Integration tests verify full workflows
-- [ ] No panic!() calls on malformed input
-- [ ] Release binary builds without warnings: `cargo build --release`
+## Prerequisites
 
-### Documentation
-- [x] Config schema documented (config.rs)
-- [x] Wallet persistence documented (wallet_persistence.rs)
-- [x] Deployment instructions provided (this file)
+### Local (macOS)
+- Rust toolchain (already installed)
+- Binary from Pi build
+- SSH access to Raspberry Pi
 
----
+### Raspberry Pi 3
+- Raspbian OS (latest)
+- Rust toolchain installed
+- Git repository cloned
+- ~115GB disk space available
 
-## Phase 1: Local Development (Single Machine)
+## Building on Raspberry Pi
 
-### Setup
+The binary is built natively on the Pi 3 using:
+
 ```bash
-# Initialize local node
-./target/release/nomadcoin init \
-  --chain_id nomadcoin-dev-1 \
-  --allocation 10000000 \
-  --data_dir ./mainnet/node1
+ssh noktirnal@pi3.local
+source ~/.cargo/env
+cd ~/nomadcoin
+cargo build --release -j 2
 ```
 
-### Start First Node
+**Estimated time**: 6-8 hours
+
+## Testing Locally
+
+### Retrieve Binary
 ```bash
-./target/release/nomadcoin node \
-  --port 9333 \
-  --data_dir ./mainnet/node1
+scp noktirnal@pi3.local:~/nomadcoin/target/release/nomadcoin ./target/release/nomadcoin
+chmod +x target/release/nomadcoin
 ```
 
-### Test Wallet Operations
+### Start Local 3-Node Cluster
 ```bash
-# Create wallet
-./target/release/nomadcoin wallet --count 1
-
-# Import address
-./target/release/nomadcoin import --key <64_hex_key>
-
-# Check balance
-./target/release/nomadcoin balance --address nomad1xxx...
+chmod +x deploy_mainnet_local.sh
+./deploy_mainnet_local.sh
 ```
 
----
-
-## Phase 2: Multi-Node Local Network
-
-### Start Three Local Nodes (3-terminal setup)
-
-**Terminal 1: Node 1 (Primary)**
+### Stop Cluster
 ```bash
-./target/release/nomadcoin node \
-  --port 9333 \
-  --data_dir ./mainnet/node1
+# Ctrl+C in terminal or killall nomadcoin
 ```
 
-**Terminal 2: Node 2 (Bootstrap from Node 1)**
+## Deploying to Pi Mainnet
+
+### Deploy Binary & Config
 ```bash
-./target/release/nomadcoin node \
-  --port 9334 \
-  --bootstrap /ip4/127.0.0.1/tcp/9333/p2p/NODE1_PEER_ID \
-  --data_dir ./mainnet/node2
+chmod +x deploy_to_pi.sh
+./deploy_to_pi.sh pi3.local noktirnal target/release/nomadcoin mainnet/config.mainnet.json
 ```
 
-**Terminal 3: Node 3 (Bootstrap from Node 1)**
+### Start Nodes
 ```bash
-./target/release/nomadcoin node \
-  --port 9335 \
-  --bootstrap /ip4/127.0.0.1/tcp/9333/p2p/NODE1_PEER_ID \
-  --data_dir ./mainnet/node3
+ssh noktirnal@pi3.local
+
+# Node 1 (bootstrap)
+~/nomadcoin node --port 9333 --data-dir ~/nomadcoin/node1 --config ~/nomadcoin/config/mainnet.json &
+
+# Node 2
+~/nomadcoin node --port 9334 --data-dir ~/nomadcoin/node2 --config ~/nomadcoin/config/mainnet.json --peer 127.0.0.1:9333 &
+
+# Node 3
+~/nomadcoin node --port 9335 --data-dir ~/nomadcoin/node3 --config ~/nomadcoin/config/mainnet.json --peer 127.0.0.1:9333 &
 ```
 
-### Register Validators
-```bash
-# Register validator on node 1 (admin only)
-./target/release/nomadcoin register-validator \
-  --address nomad1xxx... \
-  --stake 1000 \
-  --mobile
-```
+## Mainnet Configuration
 
-### Verify Consensus
-- Check that blocks are created every 5 seconds
-- Verify that all 3 nodes reach consensus
-- Confirm transactions finalize after 5 blocks (~25 seconds)
+File: `mainnet/config.mainnet.json`
 
----
+- **chain_id**: "nomadcoin-mainnet-1" (prevents cross-chain replays)
+- **block_time**: 5 seconds
+- **finality**: 5 blocks (~25 seconds)
+- **bootstrap_peers**: Localhost nodes for initial cluster
 
-## Phase 3: Multi-Machine Local Network (Mac + Raspberry Pi)
+## Security Features
 
-### Network Setup
-1. **Determine Local IP Addresses**
-   ```bash
-   # On Mac
-   ifconfig | grep "inet "
-   
-   # On Raspberry Pi
-   hostname -I
-   ```
-
-2. **Update Bootstrap Peers in config.mainnet.json**
-   ```json
-   {
-     "bootstrap_peers": ["192.168.1.100:9333"]  // Mac's local IP
-   }
-   ```
-
-3. **Copy Files to Raspberry Pi**
-   ```bash
-   scp -r ./target/release/nomadcoin pi@raspberrypi.local:/home/pi/nomadcoin/
-   scp config.mainnet.json pi@raspberrypi.local:/home/pi/nomadcoin/
-   ```
-
-4. **Start Nodes**
-   - Mac: `./nomadcoin node --port 9333`
-   - RPi: `./nomadcoin node --port 9333 --bootstrap /ip4/192.168.1.100/tcp/9333`
-
----
-
-## Phase 4: Public Testnet Deployment
-
-### Prerequisites
-- [ ] Domain name for bootstrap peer (e.g., `bootstrap.nomadcoin.testnet`)
-- [ ] Static IP address or DynDNS setup
-- [ ] Firewall rules (allow TCP 9333)
-- [ ] TLS certificates for P2P (use `config.mainnet.json`)
-
-### Deployment
-1. Update `config.mainnet.json` with testnet bootstrap peers (DNS names, not IPs)
-2. Deploy bootstrap node to public infrastructure
-3. Provide bootstrap peer address to community
-4. Monitor node health and consensus progress
-
-### Monitoring
-```bash
-# Check node status
-curl http://localhost:9334/status  # Requires RPC endpoint implementation
-
-# Monitor blocks
-./target/release/nomadcoin blockchain --stats
-
-# Track consensus rounds
-./target/release/nomadcoin consensus --monitor
-```
-
----
-
-## Phase 5: Public Mainnet Deployment
-
-### CRITICAL REQUIREMENTS
-1. **Bootstrap Peers**: Configure 3+ public bootstrap nodes with DNS
-2. **TLS Certificates**: Use proper PKI (not self-signed)
-3. **Key Management**: Use HSM or KMS for validator keys
-4. **Monitoring**: Set up Prometheus/Grafana dashboards
-5. **Alerting**: Configure PagerDuty/Slack notifications
-
-### Mainnet Configuration
-```json
-{
-  "chain_id": "nomadcoin-mainnet-1",
-  "bootstrap_peers": [
-    "bootstrap1.nomadcoin.io:9333",
-    "bootstrap2.nomadcoin.io:9333",
-    "bootstrap3.nomadcoin.io:9333"
-  ]
-}
-```
-
-### Launch Steps
-1. Deploy bootstrap infrastructure
-2. Announce genesis timestamp
-3. Start validators
-4. Monitor block production
-5. Enable public RPC endpoints (once stable)
-
----
-
-## Security Considerations
-
-### For Testnet
-- Self-signed TLS certificates acceptable
-- Single-machine testing sufficient
-- Shared validator keys for testing
-
-### For Mainnet
-- **TLS**: Proper CA-signed certificates required
-- **Keys**: Each validator must have unique, securely stored keys
-- **Consensus**: Monitor 2/3+ validator participation
-- **Finality**: Require 5+ block confirmations before considering transactions final
-- **Rate Limiting**: Implement DOS protection on P2P layer
-- **Monitoring**: Real-time alerting on consensus failures
-
----
+✅ Replay attack protection (nonce/chain_id validation)
+✅ TLS certificate handling (custom verifier)
+✅ Finality enforcement (5-block requirement)
+✅ Configuration externalization (JSON-based)
 
 ## Troubleshooting
 
-### Nodes Not Connecting
-- Check firewall rules: `sudo ufw allow 9333/tcp`
-- Verify IP addresses: `netstat -an | grep 9333`
-- Check logs for "Connection refused" errors
-
-### Consensus Not Reached
-- Verify validator count >= 3
-- Check that all validators are staking >= 100 NOMAD
-- Monitor network latency between nodes
-
-### Blocks Not Finalizing
-- Confirm finality_blocks = 5 in config
-- Check that all blocks are properly signed
-- Verify validator uptime
+**Build stalls**: Check `tail -f ~/build.log`, disk space (`df -h`), reduce parallelism
+**Nodes don't connect**: Verify ports (netstat), check bootstrap peer reachability
+**Finality issues**: Wait 25+ seconds after block inclusion
 
 ---
 
-## Next Steps After Launch
-
-1. **Block Explorer**: Deploy public block explorer UI
-2. **RPC Endpoints**: Set up JSON-RPC API for wallets
-3. **Mobile Apps**: Update wallet apps with mainnet chain_id
-4. **Governance**: Implement on-chain governance for parameter changes
-5. **Upgrades**: Plan upgrade procedures for protocol changes
-
----
-
-## Support & Contact
-
-- GitHub Issues: github.com/noktirnal42/nomadcoin/issues
-- Community Discord: [TBD]
-- Security Reports: security@nomadcoin.io
+**Status**: Ready for Pi deployment
+**Created**: 2026-04-08
