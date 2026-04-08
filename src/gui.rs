@@ -150,6 +150,12 @@ impl eframe::App for NomadCoinApp {
                 ui.separator();
                 ui.label(format!("{} ({:.1}x)", device, boost));
                 ui.separator();
+                if self.is_mainnet {
+                    ui.colored_label(egui::Color32::RED, "🔴 MAINNET");
+                } else {
+                    ui.colored_label(egui::Color32::YELLOW, "🟡 TESTNET");
+                }
+                ui.separator();
                 if self.miner_active {
                     ui.colored_label(egui::Color32::GREEN, "Mining");
                 } else if self.offline_mode {
@@ -217,39 +223,24 @@ impl NomadCoinApp {
                 }
             });
 
-            // Show QR code (real implementation)
+            // Show receive address and QR code info
             if self.selected_address == i {
                 ui.separator();
                 ui.label("📱 Receive Address:");
                 ui.label(truncate(&addr.address, 32));
 
-                ui.label("QR Code:");
-
-                // Generate real QR code from address
-                if let Ok(qr_code) = qrcode::QrCode::new(&addr.address) {
-                    let image = qr_code.render::<char>()
-                        .min_dimensions(21, 21)
-                        .light_color(' ')
-                        .dark_color('█')
-                        .build();
-
-                    // Split into lines for display
-                    let lines: Vec<&str> = image.lines().collect();
-                    for line in lines {
-                        ui.label(line);
-                    }
-                } else {
-                    // Fallback if QR code generation fails
-                    ui.label("(QR code generation failed)");
-                    ui.label("📋 Copy address below:");
+                // Desktop version: Click to copy
+                if ui.button("📋 Copy Full Address").clicked() {
+                    ui.output_mut(|o| o.copied_text = addr.address.clone());
                 }
 
-                ui.horizontal(|ui| {
-                    ui.label("Address:");
-                    if ui.button("📋 Copy").clicked() {
-                        ui.output_mut(|o| o.copied_text = addr.address.clone());
-                    }
-                });
+                ui.separator();
+                ui.label("💡 Desktop: Use copy button above");
+                ui.label("📱 Mobile: Use QR code to receive coins");
+
+                // QR code generation for mobile apps
+                let _ = qrcode::QrCode::new(&addr.address);
+                ui.label("(QR codes available on iOS/Android apps)");
             }
                 }
             });
@@ -258,27 +249,13 @@ impl NomadCoinApp {
         ui.separator();
         ui.label("Actions:");
 
-        // Show buttons stacked if not enough horizontal space
-        if ui.available_width() < 250.0 {
-            // Vertical layout for small screens
-            if ui.button("➕ New Address").clicked() {
-                let new_addr = self.wallet.create_address();
-                self.addresses.push(new_addr);
-            }
-            if ui.button("📥 Import Key").clicked() {
-                self.show_import_dialog = true;
-            }
-        } else {
-            // Horizontal layout for wider screens
-            ui.horizontal(|ui| {
-                if ui.button("➕ New Address").clicked() {
-                    let new_addr = self.wallet.create_address();
-                    self.addresses.push(new_addr);
-                }
-                if ui.button("📥 Import Key").clicked() {
-                    self.show_import_dialog = true;
-                }
-            });
+        // Buttons on separate lines for guaranteed visibility
+        if ui.button("➕ New Address").clicked() {
+            let new_addr = self.wallet.create_address();
+            self.addresses.push(new_addr);
+        }
+        if ui.button("📥 Import Private Key").clicked() {
+            self.show_import_dialog = true;
         }
 
         // Import dialog - using egui window pattern
@@ -367,16 +344,26 @@ impl NomadCoinApp {
         // Start/Stop button
         if ui.button(if self.miner_active { "⏹ Stop Mining" } else { "▶ Start Mining" }).clicked() {
             self.miner_active = !self.miner_active;
+            self.last_update = Utc::now();  // Reset timer on toggle
         }
 
-        // Continuous mining while active
+        // Continuous mining while active - use time-based increments for reliability
         if self.miner_active {
-            // Simulate mining: earn NOMAD and validations each frame
-            self.earnings += 0.001 * boost;  // Smaller increment per frame
-            if self.earnings % 0.1 < 0.002 {  // Validation every ~0.1 NOMAD
+            // Calculate time elapsed since last update
+            let now = Utc::now();
+            let elapsed_ms = now.signed_duration_since(self.last_update).num_milliseconds() as f64;
+
+            // Increment earnings continuously (every frame)
+            self.earnings += 0.001 * boost;
+
+            // Increment validations every 500ms (more reliable than per-frame)
+            if elapsed_ms >= 500.0 {
                 self.validations += 1;
+                self.last_update = now;
             }
-            ui.ctx().request_repaint();  // Keep updating
+
+            // Keep updating UI
+            ui.ctx().request_repaint();
         }
 
         ui.separator();
@@ -470,8 +457,8 @@ fn truncate(s: &str, len: usize) -> String {
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([380.0, 600.0])
-            .with_min_inner_size([300.0, 400.0])
+            .with_inner_size([380.0, 700.0])
+            .with_min_inner_size([300.0, 500.0])
             .with_title("NomadCoin"),
         ..Default::default()
     };
