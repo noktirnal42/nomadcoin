@@ -39,11 +39,15 @@ struct NomadCoinApp {
     offline_mode: bool,
     peer_count: usize,
 
+    // Network Selection
+    network_mode: String, // "testnet" or "mainnet"
+    network_endpoint: String,
+
     // Mainnet
     mainnet_boost: String,
     mainnet_bootstrap: String,
     is_mainnet: bool,
-    
+
     // Import
     show_import_dialog: bool,
     import_key: String,
@@ -79,6 +83,8 @@ impl NomadCoinApp {
             peer_count: 0,
             current_tab: 0,
             last_update: Utc::now(),
+            network_mode: "testnet".to_string(),
+            network_endpoint: "http://localhost:9333".to_string(),
             mainnet_boost: "1.0x".to_string(),
             mainnet_bootstrap: if is_mainnet { "/ip4/127.0.0.1/tcp/9333/p2p/e076c356ba973b88".to_string() } else { String::new() },
             is_mainnet,
@@ -139,7 +145,29 @@ impl NomadCoinApp {
 impl eframe::App for NomadCoinApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
-        
+
+        // Refresh balance from blockchain every 2 seconds
+        let now = Utc::now();
+        if (now - self.last_update).num_seconds() >= 2 {
+            self.last_update = now;
+
+            // Update balance from blockchain
+            if !self.addresses.is_empty() {
+                let addr = &self.addresses[self.selected_address];
+
+                // Try to load blockchain and get balance
+                if let Ok(storage) = storage::Storage::new("./mainnet/node1/chaindata") {
+                    if let Ok(Some(blockchain)) = storage.load_blockchain() {
+                        self.balance = blockchain.get_balance(&addr.address);
+                    }
+                } else if let Ok(storage) = storage::Storage::new("./testnet/node1/chaindata") {
+                    if let Ok(Some(blockchain)) = storage.load_blockchain() {
+                        self.balance = blockchain.get_balance(&addr.address);
+                    }
+                }
+            }
+        }
+
         let device = Self::detect_device();
         let boost = Self::get_boost(&device);
         
@@ -150,11 +178,18 @@ impl eframe::App for NomadCoinApp {
                 ui.separator();
                 ui.label(format!("{} ({:.1}x)", device, boost));
                 ui.separator();
-                if self.is_mainnet {
-                    ui.colored_label(egui::Color32::RED, "[MAINNET]");
-                } else {
-                    ui.colored_label(egui::Color32::YELLOW, "[TESTNET]");
+
+                // Network selector
+                ui.label("Network:");
+                if ui.button(if self.network_mode == "testnet" { "🧪 TESTNET" } else { "⚪ TESTNET" }).clicked() {
+                    self.network_mode = "testnet".to_string();
+                    self.network_endpoint = "http://localhost:9333".to_string();
                 }
+                if ui.button(if self.network_mode == "mainnet" { "🔴 MAINNET" } else { "⚪ MAINNET" }).clicked() {
+                    self.network_mode = "mainnet".to_string();
+                    self.network_endpoint = "http://localhost:9333".to_string(); // Will be updated when mainnet is deployed
+                }
+
                 ui.separator();
                 if self.miner_active {
                     ui.colored_label(egui::Color32::GREEN, "Mining");
