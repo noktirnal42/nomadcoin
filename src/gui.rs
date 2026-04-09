@@ -241,24 +241,44 @@ impl NomadCoinApp {
 
                 // QR code generation and rendering
                 if let Ok(qr_code) = qrcode::QrCode::new(&addr.address) {
-                    let image = qr_code.render::<char>()
-                        .min_dimensions(21, 21)
-                        .light_color(' ')
-                        .dark_color('█')
-                        .build();
-
                     ui.separator();
                     ui.label("QR Code (scan with mobile):");
-                    // Render QR code with larger monospace font for better proportions
+
+                    // Render QR code as actual image
+                    let qr_image = qr_code.render::<image::Luma<u8>>()
+                        .min_dimensions(256, 256)
+                        .build();
+
+                    // Convert to egui ColorImage
+                    let size = [qr_image.width() as usize, qr_image.height() as usize];
+                    let pixels: Vec<egui::Color32> = qr_image.iter()
+                        .map(|&luma_val| {
+                            // Each pixel is already a u8 (grayscale value)
+                            if luma_val == 255 {
+                                egui::Color32::WHITE
+                            } else {
+                                egui::Color32::BLACK
+                            }
+                        })
+                        .collect();
+
+                    let color_image = egui::ColorImage {
+                        size,
+                        pixels,
+                    };
+
+                    let texture = ui.ctx().load_texture(
+                        format!("qr_code_{}", addr.address),
+                        egui::ImageData::Color(std::sync::Arc::new(color_image)),
+                        Default::default(),
+                    );
+
+                    // Display QR code image
                     egui::Frame::group(ui.style())
                         .fill(egui::Color32::WHITE)
-                        .inner_margin(12.0)
+                        .inner_margin(8.0)
                         .show(ui, |ui| {
-                            // Use larger font and center alignment for better aspect ratio
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(egui::RichText::new(image)
-                                    .font(egui::FontId::monospace(10.0)));
-                            });
+                            ui.image(&texture);
                         });
                 }
             }
