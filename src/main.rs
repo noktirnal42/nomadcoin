@@ -7,6 +7,7 @@ pub mod miner;
 pub mod network;
 pub mod storage;
 pub mod types;
+pub mod validator_persistence;
 pub mod wallet;
 pub mod wallet_persistence;
 
@@ -454,6 +455,19 @@ async fn run_node(port: u16, data_dir: &str, peers: &[String]) {
         .load_consensus(100, 1.5)
         .expect("Failed to load consensus");
 
+    // Load persisted validators from disk
+    if let Ok(persisted_validators) = validator_persistence::load_validators(&path) {
+        let count = persisted_validators.len();
+        for (address, validator_state) in persisted_validators {
+            if !consensus.validators.contains_key(&address) {
+                consensus.validators.insert(address.clone(), validator_state);
+            }
+        }
+        if count > 0 {
+            tracing::info!("Loaded {} validators from disk", count);
+        }
+    }
+
     println!("Starting node on port {}...", port);
     println!("  Network:    nomadcoin");
     println!("  Port:       {}", port);
@@ -600,6 +614,10 @@ fn run_register_validator(address: &str, stake: u64, mobile: bool, data_dir: &st
             storage
                 .save_consensus(&consensus)
                 .expect("Failed to save consensus");
+
+            // Persist validator to disk for recovery on node restart
+            validator_persistence::add_validator(&path, address.to_string(), stake, mobile)
+                .expect("Failed to persist validator");
 
             println!("✅ Validator Registered!");
             println!("  Address:     {}", address);
