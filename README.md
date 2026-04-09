@@ -1,7 +1,7 @@
 # 🌍 NomadCoin
 
 <div align="center">
-  <img src="assets/logo.svg" alt="NomadCoin Logo" width="200" height="200"/>
+  <img src="assets/logo.png" alt="NomadCoin Logo" width="200" height="200"/>
   
   ### 💰 A Mobile-First Cryptocurrency for the Nomadic Community
   
