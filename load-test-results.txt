@@ -1,0 +1,45 @@
+🔥 NomadCoin Load Test Suite
+============================
+
+[2m2026-04-09T05:54:32.479313Z[0m [32m INFO[0m [2mnomadcoin::load_test[0m[2m:[0m 🔥 Starting load test: 15 TPS for 60 seconds
+Test Configuration:
+  Target TPS:          15
+  Test Duration:       60 seconds
+  Concurrent Accounts: 50
+  Fee per TX:          0.001 NOMAD
+  Amount per TX:       1.0 NOMAD
+
+⏳ Running load test...
+
+⏱  Progress: 10s | TPS: 14.30 (target: 15) | Submitted: 144 | Confirmed: 72 | Failed: 72
+⏱  Progress: 20s | TPS: 14.26 (target: 15) | Submitted: 287 | Confirmed: 144 | Failed: 143
+⏱  Progress: 30s | TPS: 14.23 (target: 15) | Submitted: 429 | Confirmed: 215 | Failed: 214
+⏱  Progress: 40s | TPS: 14.23 (target: 15) | Submitted: 572 | Confirmed: 286 | Failed: 286
+⏱  Progress: 50s | TPS: 14.23 (target: 15) | Submitted: 715 | Confirmed: 358 | Failed: 357
+
+
+======================================================================
+📊 LOAD TEST REPORT
+======================================================================
+
+Transaction Statistics:
+  Total Submitted:    853
+  Total Confirmed:    427
+  Total Failed:       426
+  Confirmation Rate:  50.06%
+
+Throughput:
+  Average TPS:        14.22
+  Peak TPS:           0.00
+
+Block Metrics:
+  Final Height:       1
+  Min Block Time:     5000 ms
+  Max Block Time:     5000 ms
+  Avg Block Time:     5000 ms
+
+Test Duration:
+  Total Time:         60 seconds
+======================================================================
+
+✅ Load test completed successfully!

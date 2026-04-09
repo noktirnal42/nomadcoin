@@ -23,15 +23,11 @@
             width: 150px;
             height: 150px;
             margin: 0 auto 30px;
-            background: linear-gradient(135deg, #00BCD4, #7C4DFF, #FFD700);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 72px;
-            font-weight: bold;
-            color: #0A0E27;
-            box-shadow: 0 0 40px rgba(0, 188, 212, 0.4);
+        }
+        .logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
         }
         h1 {
             font-size: 3.5rem;
@@ -156,7 +152,9 @@
     <div class="container">
         <!-- Header -->
         <header>
-            <div class="logo">N</div>
+            <div class="logo">
+                <img src="../assets/NOMADcoin_logo.png" alt="NomadCoin Logo">
+            </div>
             <h1>NomadCoin</h1>
             <p class="tagline">A mobile-first cryptocurrency for the nomadic community</p>
             <div class="cta-buttons">
