@@ -488,6 +488,14 @@ async fn run_node(port: u16, data_dir: &str, peers: &[String]) {
         }
     }
 
+    // Sync consensus validators to blockchain state for Phase 6 propagation
+    // This ensures Phase 6 validator synchronization includes registered validators
+    let mut blockchain_mut = blockchain;
+    for (address, validator) in &consensus.validators {
+        blockchain_mut.state.validators.insert(address.clone(), validator.stake as f64);
+    }
+    let blockchain = blockchain_mut;
+
     println!("Starting node on port {}...", port);
     println!("  Network:    nomadcoin");
     println!("  Port:       {}", port);
