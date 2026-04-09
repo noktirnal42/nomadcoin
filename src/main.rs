@@ -536,47 +536,45 @@ async fn run_node(port: u16, data_dir: &str, peers: &[String]) {
             // Produce blocks on schedule
             _ = block_interval.tick() => {
                 let mut bc = blockchain.lock().await;
-                if bc.mempool_size() > 0 || bc.height() == 0 {
-                    // Select proposer
-                    if let Some(proposer) = consensus.select_proposer() {
-                        // Start consensus round
-                        let next_height = bc.height() + 1;
-                        consensus.start_round(next_height, proposer.clone());
+                // Select proposer (blocks produce every interval, even if empty)
+                if let Some(proposer) = consensus.select_proposer() {
+                    // Start consensus round
+                    let next_height = bc.height() + 1;
+                    consensus.start_round(next_height, proposer.clone());
 
-                        // Simulate validator votes (in production, this is distributed)
-                        for validator_addr in consensus.validators.keys().cloned().collect::<Vec<_>>() {
-                            let _ = consensus.record_prevote(&validator_addr, true);
-                            let _ = consensus.record_precommit(&validator_addr, true);
-                        }
+                    // Simulate validator votes (in production, this is distributed)
+                    for validator_addr in consensus.validators.keys().cloned().collect::<Vec<_>>() {
+                        let _ = consensus.record_prevote(&validator_addr, true);
+                        let _ = consensus.record_precommit(&validator_addr, true);
+                    }
 
-                        // Check if consensus reached
-                        if consensus.is_consensus_reached() {
-                            // Create block
-                            let block = bc.create_block(&proposer);
+                    // Check if consensus reached
+                    if consensus.is_consensus_reached() {
+                        // Create block
+                        let block = bc.create_block(&proposer);
 
-                            // Finalize consensus
-                            if consensus.finalize_block().is_ok() {
-                                // Save to storage
-                                if let Err(e) = storage.save_blockchain(&*bc) {
-                                    tracing::error!("Failed to save blockchain: {}", e);
-                                }
-                                if let Err(e) = storage.save_consensus(&consensus) {
-                                    tracing::error!("Failed to save consensus: {}", e);
-                                }
-
-                                // Broadcast block
-                                let block_bytes = serde_json::to_vec(&block).unwrap_or_default();
-                                let block_height = bc.height();
-                                drop(bc); // Release lock before async operation
-                                network.broadcast_block(block_bytes, block_height).await;
-
-                                println!(
-                                    "✅ Block {} created with {} transactions (proposer: {})",
-                                    block_height,
-                                    block.header.transaction_count,
-                                    proposer
-                                );
+                        // Finalize consensus
+                        if consensus.finalize_block().is_ok() {
+                            // Save to storage
+                            if let Err(e) = storage.save_blockchain(&*bc) {
+                                tracing::error!("Failed to save blockchain: {}", e);
                             }
+                            if let Err(e) = storage.save_consensus(&consensus) {
+                                tracing::error!("Failed to save consensus: {}", e);
+                            }
+
+                            // Broadcast block
+                            let block_bytes = serde_json::to_vec(&block).unwrap_or_default();
+                            let block_height = bc.height();
+                            drop(bc); // Release lock before async operation
+                            network.broadcast_block(block_bytes, block_height).await;
+
+                            println!(
+                                "✅ Block {} created with {} transactions (proposer: {})",
+                                block_height,
+                                block.header.transaction_count,
+                                proposer
+                            );
                         }
                     }
                 }
