@@ -245,6 +245,12 @@ impl Blockchain {
         *self.state.balances.get(address).unwrap_or(&0.0)
     }
 
+    /// Add balance to address (mining rewards)
+    pub fn add_balance(&mut self, address: &str, amount: f64) {
+        let current = self.get_balance(address);
+        self.state.balances.insert(address.to_string(), current + amount);
+    }
+
     /// Get block by height
     pub fn get_block(&self, height: u64) -> Option<&Block> {
         if height == 0 || height > self.height {

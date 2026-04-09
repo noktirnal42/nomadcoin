@@ -23,11 +23,12 @@ struct NomadCoinApp {
     addresses: Vec<WalletAddress>,
     selected_address: usize,
     balance: f64,
-    
+
     // Miner
     miner_active: bool,
     miner_device: String,
     earnings: f64,
+    previous_earnings: f64,
     validations: u64,
     
     // Send form
@@ -75,6 +76,7 @@ impl NomadCoinApp {
             miner_active: false,
             miner_device: device.clone(),
             earnings: 0.0,
+            previous_earnings: 0.0,
             validations: 0,
             send_to: String::new(),
             send_amount: String::new(),
@@ -435,6 +437,28 @@ impl NomadCoinApp {
             if elapsed_ms >= 500.0 {
                 self.validations += 1;
                 self.last_update = now;
+
+                // Persist mining rewards to blockchain when validations increase
+                let reward_earned = self.earnings - self.previous_earnings;
+                if reward_earned > 0.0 && !self.addresses.is_empty() {
+                    let miner_address = &self.addresses[self.selected_address].address;
+                    let chaindata_dir = if self.network_mode == "testnet" {
+                        "./testnet/node1/chaindata"
+                    } else {
+                        "./mainnet/node1/chaindata"
+                    };
+
+                    if let Ok(mut storage) = storage::Storage::new(chaindata_dir) {
+                        if let Ok(Some(mut blockchain)) = storage.load_blockchain() {
+                            // Add mining reward to the miner's balance
+                            blockchain.add_balance(miner_address, reward_earned);
+                            // Persist to storage
+                            let _ = storage.save_blockchain(&blockchain);
+                            self.previous_earnings = self.earnings;
+                            self.balance += reward_earned;
+                        }
+                    }
+                }
             }
 
             // Keep updating UI

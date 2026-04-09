@@ -1,62 +1,58 @@
-# NomadCoin Wallet Releases v1.0.1
+# NomadCoin Wallet Releases v1.0.3
 
-**Release Date**: April 9, 2026 (Updated)  
-**Status**: Testnet & Mainnet Ready
+**Release Date**: April 8, 2026  
+**Status**: Testnet Ready with Mining Balance & Multi-Address Support
 
-## What's New in v1.0.1
+## What's New in v1.0.3
 
-### ✨ Features Added
-- **Network Selection**: Toggle between TESTNET and MAINNET in GUI
-- **Real-Time Balance Updates**: Balance refreshes every 2 seconds
-- **Image-Based QR Codes**: Proper QR code images instead of ASCII
-- **Active Mining Display**: See balance increase as you mine
+### ✨ New Features
+- **Mining Rewards Persist**: Mining rewards now properly update wallet balance
+- **Multiple Addresses**: Generate new addresses within the same wallet
+- **Address Management**: Switch between addresses with dropdown selector
+- **Add_Balance Method**: Blockchain now has persistent reward mechanism
 
-### 🔧 Fixes
-- Fixed GUI QR code rendering (was ASCII, now images)
-- Fixed wallet balance not updating from mining rewards
-- Added network mode selector to header
-- Improved blockchain state synchronization
+### 🔧 Critical Fixes
+- ✅ **MAJOR**: Mining earnings now persist to blockchain storage (wallet balance reflects actual mining)
+- ✅ Generated addresses stored and selectable across app restarts
+- ✅ Mining loop now writes rewards every 500ms validation cycle
+- ✅ Flutter wallet tracks multiple addresses in SharedPreferences
 
 ### 📱 Platform Releases
 
 #### macOS
-- **NomadCoin-Wallet-GUI-v1.0.1.app** (15MB)
-  - Desktop graphical wallet
+- **NomadCoin-Wallet-GUI-v1.0.2** (18MB)
+  - Desktop graphical wallet with mining persistence
+  - Mining rewards now update wallet balance in real-time
   - Network selector (TESTNET/MAINNET)
-  - Real-time balance updates
   - Image-based QR codes
 
-- **NomadCoin-CLI-v1.0.1** (11MB)
-  - Command-line wallet
+- **NomadCoin-CLI-v1.0.2** (11MB)
+  - Command-line wallet with all features
   - Full transaction support
   - Advanced user tool
 
 #### Android
-- **NomadCoin-Wallet-v1.0.1.apk** (48MB)
-  - Mobile wallet
-  - Optimized for on-the-go use
+- **NomadCoin-Wallet-v1.0.3.apk** (50MB)
+  - Mobile wallet with address management
+  - Generate and select multiple addresses
+  - Real-time mining balance updates
   - 1.5x mining boost on mobile
 
-#### iOS (Coming Soon)
-- Build from source or wait for App Store
-
-#### Linux (Coming Soon)
-- AppImage available soon
-
-#### Windows (Coming Soon)
-- .msi installer available soon
+#### iOS
+- Full source code with all v1.0.3 features
 
 ---
 
 ## Key Improvements
 
-| Component | v1.0.0 | v1.0.1 |
-|-----------|--------|--------|
-| QR Codes | ASCII | ✅ Image |
-| Network Mode | Hardcoded | ✅ Selectable |
-| Balance Updates | Static | ✅ Real-time |
-| Mining Rewards | Not visible | ✅ Instant |
-| Testnet Support | ✅ | ✅ Enhanced |
+| Component | v1.0.0 | v1.0.1 | v1.0.2 | v1.0.3 |
+|-----------|--------|--------|--------|--------|
+| QR Codes | ASCII | ✅ Image | ✅ Image | ✅ Image |
+| Network Mode | Hardcoded | ✅ Selectable | ✅ Works | ✅ Works |
+| Balance Updates | Static | ✅ Real-time | ✅ Real-time | ✅ Real-time |
+| Mining Rewards | Not visible | ✅ Display | ❌ In-memory only | ✅ Persist to blockchain |
+| Multiple Addresses | ❌ | ❌ | ❌ | ✅ Generate & Select |
+| Blockchain Persistence | ❌ | ❌ | ❌ | ✅ Mining rewards saved |
 
 ---
 
@@ -65,7 +61,7 @@
 ### Quick Start
 ```bash
 # macOS GUI (easiest)
-open complete_wallet_releases/macOS/NomadCoin-Wallet-GUI-v1.0.1.app
+open complete_wallet_releases/macOS/NomadCoin-Wallet-GUI-v1.0.2
 
 # Android
 # Transfer APK and tap to install
@@ -77,21 +73,48 @@ open complete_wallet_releases/macOS/NomadCoin-Wallet-GUI-v1.0.1.app
 ---
 
 ## Known Issues Fixed
-- ✅ GUI QR codes showing as ASCII
-- ✅ Wallet balance not reflecting mining rewards
-- ✅ No way to switch between testnet/mainnet
-- ✅ Balance updates only on app restart
+- ✅ Mining balance not persisting to blockchain
+- ✅ No way to generate multiple addresses
+- ✅ Address selection limited to single address
+- ✅ Mining rewards only showing in-memory
+
+---
+
+## Technical Details
+
+### src/blockchain.rs Changes
+```rust
+pub fn add_balance(&mut self, address: &str, amount: f64) {
+    let current = self.get_balance(address);
+    self.state.balances.insert(address.to_string(), current + amount);
+}
+```
+
+### src/gui.rs Mining Logic
+- Previous earnings tracked separately
+- Every 500ms validation: calculates reward_earned = current - previous
+- Writes reward to blockchain storage via add_balance()
+- Updates previous_earnings to prevent double-counting
+- Balance immediately updates from blockchain sync
+
+### Flutter Provider Changes
+- addresses: Vec<String> for multiple addresses
+- selectedAddressIndex for current selection
+- generateNewAddress() creates and stores new address
+- selectAddress(index) switches between addresses
+- All addresses persisted to SharedPreferences
 
 ---
 
 ## Testing Checklist
-- ✅ macOS GUI builds and runs
+- ✅ macOS GUI builds with mining persistence
+- ✅ Mining rewards update wallet balance in real-time
 - ✅ Network selector works
 - ✅ QR codes display as images
-- ✅ Balance updates in real-time
-- ✅ Mining rewards visible
-- ✅ Android APK builds
-- ✅ Cross-platform functionality
+- ✅ Android v1.0.3 APK builds
+- ✅ Address generation creates unique addresses
+- ✅ Address selection switches properly
+- ✅ Cross-platform functionality consistent
 
 ---
 
