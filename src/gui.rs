@@ -13,6 +13,7 @@ pub mod wallet;
 
 use eframe::egui;
 use chrono::{DateTime, Utc};
+use std::path::PathBuf;
 
 // Re-export types for convenience
 use types::WalletAddress;
@@ -61,18 +62,76 @@ struct NomadCoinApp {
 }
 
 impl NomadCoinApp {
+    fn wallet_file() -> PathBuf {
+        let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        path.push(".nomadcoin");
+        std::fs::create_dir_all(&path).ok();
+        path.push("wallet.json");
+        path
+    }
+
+    fn save_addresses(addresses: &[WalletAddress], selected: usize) {
+        let data = serde_json::json!({
+            "addresses": addresses,
+            "selected_index": selected,
+        });
+        let _ = std::fs::write(Self::wallet_file(), data.to_string());
+    }
+
+    fn load_addresses() -> Option<(Vec<WalletAddress>, usize)> {
+        let content = std::fs::read_to_string(Self::wallet_file()).ok()?;
+        let data: serde_json::Value = serde_json::from_str(&content).ok()?;
+
+        let addresses: Vec<WalletAddress> = serde_json::from_value(data["addresses"].clone()).ok()?;
+        let selected: usize = data["selected_index"].as_u64().unwrap_or(0) as usize;
+
+        if addresses.is_empty() {
+            None
+        } else {
+            let len = addresses.len();
+            Some((addresses, selected.min(len - 1)))
+        }
+    }
+
     fn new() -> Self {
+        // Try to load existing wallet from file
+        let (addresses, selected_index) = if let Some((addr, idx)) = Self::load_addresses() {
+            (addr, idx)
+        } else {
+            // Create default addresses if none exist
+            let mut wallet = wallet::Wallet::new();
+            let addr1 = wallet.create_address();
+            let addr2 = wallet.create_address();
+            (vec![addr1, addr2], 0)
+        };
+
         // Try to load existing mainnet blockchain, otherwise create genesis
-        let (_blockchain, balance, addresses) = Self::load_or_create_blockchain();
+        let (_blockchain, balance, _) = Self::load_or_create_blockchain();
         
         let device = Self::detect_device();
         let is_mainnet = std::path::Path::new("./mainnet/node1/chaindata").exists();
-        
+
+        // Get balance for selected address
+        let selected_balance = if !addresses.is_empty() && selected_index < addresses.len() {
+            // Query blockchain for balance of selected address
+            if let Ok(storage) = storage::Storage::new("./testnet/node1/chaindata") {
+                if let Ok(Some(bc)) = storage.load_blockchain() {
+                    bc.get_balance(&addresses[selected_index].address)
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            }
+        } else {
+            balance
+        };
+
         NomadCoinApp {
             wallet: wallet::Wallet::new(),
             addresses: addresses.clone(),
-            selected_address: if !addresses.is_empty() { 0 } else { 0 },
-            balance,
+            selected_address: selected_index,
+            balance: selected_balance,
             miner_active: false,
             miner_device: device.clone(),
             earnings: 0.0,
@@ -153,18 +212,20 @@ impl eframe::App for NomadCoinApp {
         if (now - self.last_update).num_seconds() >= 2 {
             self.last_update = now;
 
-            // Update balance from blockchain
-            if !self.addresses.is_empty() {
-                let addr = &self.addresses[self.selected_address];
+            // Update balance from blockchain for selected address
+            if !self.addresses.is_empty() && self.selected_address < self.addresses.len() {
+                let addr = &self.addresses[self.selected_address].address;
 
-                // Try to load blockchain and get balance
-                if let Ok(storage) = storage::Storage::new("./mainnet/node1/chaindata") {
+                // Try testnet first, then mainnet
+                let chaindata_dir = if self.network_mode == "testnet" {
+                    "./testnet/node1/chaindata"
+                } else {
+                    "./mainnet/node1/chaindata"
+                };
+
+                if let Ok(storage) = storage::Storage::new(chaindata_dir) {
                     if let Ok(Some(blockchain)) = storage.load_blockchain() {
-                        self.balance = blockchain.get_balance(&addr.address);
-                    }
-                } else if let Ok(storage) = storage::Storage::new("./testnet/node1/chaindata") {
-                    if let Ok(Some(blockchain)) = storage.load_blockchain() {
-                        self.balance = blockchain.get_balance(&addr.address);
+                        self.balance = blockchain.get_balance(addr);
                     }
                 }
             }
@@ -253,6 +314,7 @@ impl NomadCoinApp {
                 };
                 if ui.button(label).clicked() {
                     self.selected_address = i;
+                    Self::save_addresses(&self.addresses, self.selected_address);
                 }
                 ui.label(truncate(&addr.address, 24));
 
@@ -330,6 +392,7 @@ impl NomadCoinApp {
         if ui.button("➕ New Address").clicked() {
             let new_addr = self.wallet.create_address();
             self.addresses.push(new_addr);
+            Self::save_addresses(&self.addresses, self.selected_address);
         }
         if ui.button("📥 Import Private Key").clicked() {
             self.show_import_dialog = true;
@@ -359,6 +422,7 @@ impl NomadCoinApp {
                                         Ok(addr) => {
                                             self.addresses.push(addr);
                                             self.selected_address = self.addresses.len() - 1;
+                                            Self::save_addresses(&self.addresses, self.selected_address);
                                             self.show_import_dialog = false;
                                             self.import_key.clear();
                                             self.import_error.clear();
