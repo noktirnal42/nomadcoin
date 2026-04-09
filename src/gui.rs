@@ -249,13 +249,16 @@ impl NomadCoinApp {
 
                     ui.separator();
                     ui.label("QR Code (scan with mobile):");
-                    // Render QR code with monospace font in white frame
+                    // Render QR code with larger monospace font for better proportions
                     egui::Frame::group(ui.style())
                         .fill(egui::Color32::WHITE)
-                        .inner_margin(8.0)
+                        .inner_margin(12.0)
                         .show(ui, |ui| {
-                            ui.label(egui::RichText::new(image)
-                                .font(egui::FontId::monospace(8.0)));
+                            // Use larger font and center alignment for better aspect ratio
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(egui::RichText::new(image)
+                                    .font(egui::FontId::monospace(10.0)));
+                            });
                         });
                 }
             }
