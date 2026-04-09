@@ -1,0 +1,13 @@
+# GitHub Pages Configuration for NomadCoin
+theme: jekyll-theme-minimal
+title: NomadCoin
+description: A mobile-first cryptocurrency for the nomadic community
+show_downloads: false
+google_analytics: false
+
+# Ensure proper asset loading
+assets:
+  precompile: []
+  
+# Markdown settings
+markdown: kramdown
