@@ -1,10 +1,11 @@
 use quinn::{Endpoint, ServerConfig, TransportConfig, VarInt};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tracing::{info, warn, error, debug};
 
-use crate::types::Transaction;
+use crate::types::{Transaction, Block};
+use crate::blockchain::Blockchain;
 
 /// P2P message types for node communication
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -47,6 +48,7 @@ pub struct P2PNetwork {
     pub tx_sender: mpsc::Sender<Transaction>,
     pub version: String,
     pub height: u64,
+    pub blockchain: Option<Arc<Mutex<Blockchain>>>,
 }
 
 impl P2PNetwork {
@@ -59,7 +61,13 @@ impl P2PNetwork {
             tx_sender,
             version: env!("CARGO_PKG_VERSION").to_string(),
             height: 0,
+            blockchain: None,
         }
+    }
+
+    /// Set blockchain reference for sync operations
+    pub fn set_blockchain(&mut self, blockchain: Arc<Mutex<Blockchain>>) {
+        self.blockchain = Some(blockchain);
     }
 
     /// Start P2P server on given port
@@ -97,12 +105,14 @@ let endpoint = Endpoint::server(server_config, addr)?;
         // Accept incoming connections
         let endpoint = self.endpoint.clone().unwrap();
         let tx_sender = self.tx_sender.clone();
+        let blockchain = self.blockchain.clone();
 
         tokio::spawn(async move {
             while let Some(connecting) = endpoint.accept().await {
                 let tx_sender = tx_sender.clone();
+                let blockchain = blockchain.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = Self::handle_connection(connecting, tx_sender).await {
+                    if let Err(e) = Self::handle_connection(connecting, tx_sender, blockchain).await {
                         error!("Connection error: {}", e);
                     }
                 });
@@ -116,6 +126,7 @@ let endpoint = Endpoint::server(server_config, addr)?;
 async fn handle_connection(
         connecting: quinn::Connecting,
         _tx_sender: mpsc::Sender<Transaction>,
+        blockchain: Option<Arc<Mutex<Blockchain>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let connection = connecting.await?;
         let peer_addr = connection.remote_address();
@@ -153,6 +164,30 @@ let mut buf = Vec::new();
                 Ok(msg) => {
                     debug!("Received message from {}: {:?}", peer_addr, msg);
                     match msg {
+                        P2PMessage::GetBlocks { from_height, limit } => {
+                            if let Some(bc) = &blockchain {
+                                let bc_guard = bc.lock().await;
+                                let blocks = bc_guard.get_blocks(from_height, limit);
+                                let response = P2PMessage::BlocksResponse { blocks };
+                                if let Ok(response_bytes) = serde_json::to_vec(&response) {
+                                    debug!("Sending {} blocks to peer {}", response_bytes.len(), peer_addr);
+                                }
+                            }
+                        }
+                        P2PMessage::BlocksResponse { blocks } => {
+                            debug!("Received {} blocks from peer {}", blocks.len(), peer_addr);
+                            if let Some(bc) = &blockchain {
+                                let mut bc_guard = bc.lock().await;
+                                for block_bytes in blocks {
+                                    if let Ok(block) = serde_json::from_slice::<Block>(&block_bytes) {
+                                        if let Err(e) = bc_guard.apply_synced_block(block) {
+                                            warn!("Failed to apply synced block: {}", e);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         P2PMessage::NewTransaction { tx } => {
                             if let Ok(transaction) = serde_json::from_slice::<Transaction>(&tx) {
                                 let _ = _tx_sender.send(transaction).await;

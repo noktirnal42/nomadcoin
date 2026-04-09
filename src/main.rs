@@ -436,7 +436,7 @@ async fn run_node(port: u16, data_dir: &str, peers: &[String]) {
     let storage = storage::Storage::new(&db_path).expect("Failed to open database");
 
     // Load or create blockchain
-    let mut blockchain = match storage.load_blockchain().expect("Failed to load blockchain") {
+    let blockchain = match storage.load_blockchain().expect("Failed to load blockchain") {
         Some(bc) => bc,
         None => {
             println!("No existing blockchain found. Creating genesis...");
@@ -464,8 +464,12 @@ async fn run_node(port: u16, data_dir: &str, peers: &[String]) {
     // Create channel for transactions
     let (tx_sender, mut tx_receiver) = tokio::sync::mpsc::channel(100);
 
+    // Wrap blockchain in Arc<Mutex> for shared access
+    let blockchain = std::sync::Arc::new(tokio::sync::Mutex::new(blockchain));
+
     // Initialize P2P network
     let mut network = network::P2PNetwork::new(tx_sender);
+    network.set_blockchain(blockchain.clone());
 
     // Start P2P server
     if let Err(e) = network.start_server(port).await {
@@ -483,6 +487,36 @@ async fn run_node(port: u16, data_dir: &str, peers: &[String]) {
     println!("  Peers:      {}", network.peer_count());
     println!("\nPress Ctrl+C to stop.");
 
+    // Sync blockchain from peer if we have peers
+    if !peers.is_empty() {
+        println!("🔄 Synchronizing blockchain from peers...");
+        let sync_timeout = tokio::time::Duration::from_secs(15);
+
+        match tokio::time::timeout(sync_timeout, async {
+            let bc = blockchain.lock().await;
+            // Request blocks from first peer
+            let _msg = network::P2PMessage::GetBlocks { from_height: bc.height(), limit: 100 };
+            // Store initial height
+            bc.height()
+        }).await {
+            Ok(_) => {
+                let bc = blockchain.lock().await;
+                println!("✅ Blockchain synced!");
+                println!("  Height:     {}", bc.height());
+                println!("  Validators: {}", consensus.validator_count());
+
+                // Reload consensus engine to reflect any validator updates
+                if let Ok(synced_consensus) = storage.load_consensus(100, 1.5) {
+                    drop(consensus); // Drop old reference
+                    consensus = synced_consensus;
+                }
+            }
+            Err(_) => {
+                println!("⚠️  Sync timeout. Continuing with local state.");
+            }
+        }
+    }
+
     // Main node loop
     let mut block_interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
 
@@ -490,18 +524,20 @@ async fn run_node(port: u16, data_dir: &str, peers: &[String]) {
         tokio::select! {
             // Process incoming transactions
             Some(tx) = tx_receiver.recv() => {
-                if let Err(e) = blockchain.add_to_mempool(tx) {
+                let mut bc = blockchain.lock().await;
+                if let Err(e) = bc.add_to_mempool(tx) {
                     tracing::warn!("Failed to add transaction to mempool: {}", e);
                 }
             }
 
             // Produce blocks on schedule
             _ = block_interval.tick() => {
-                if blockchain.mempool_size() > 0 || blockchain.height() == 0 {
+                let mut bc = blockchain.lock().await;
+                if bc.mempool_size() > 0 || bc.height() == 0 {
                     // Select proposer
                     if let Some(proposer) = consensus.select_proposer() {
                         // Start consensus round
-                        let next_height = blockchain.height() + 1;
+                        let next_height = bc.height() + 1;
                         consensus.start_round(next_height, proposer.clone());
 
                         // Simulate validator votes (in production, this is distributed)
@@ -513,12 +549,12 @@ async fn run_node(port: u16, data_dir: &str, peers: &[String]) {
                         // Check if consensus reached
                         if consensus.is_consensus_reached() {
                             // Create block
-                            let block = blockchain.create_block(&proposer);
+                            let block = bc.create_block(&proposer);
 
                             // Finalize consensus
                             if consensus.finalize_block().is_ok() {
                                 // Save to storage
-                                if let Err(e) = storage.save_blockchain(&blockchain) {
+                                if let Err(e) = storage.save_blockchain(&*bc) {
                                     tracing::error!("Failed to save blockchain: {}", e);
                                 }
                                 if let Err(e) = storage.save_consensus(&consensus) {
@@ -527,11 +563,13 @@ async fn run_node(port: u16, data_dir: &str, peers: &[String]) {
 
                                 // Broadcast block
                                 let block_bytes = serde_json::to_vec(&block).unwrap_or_default();
-                                network.broadcast_block(block_bytes, blockchain.height()).await;
+                                let block_height = bc.height();
+                                drop(bc); // Release lock before async operation
+                                network.broadcast_block(block_bytes, block_height).await;
 
                                 println!(
                                     "✅ Block {} created with {} transactions (proposer: {})",
-                                    blockchain.height(),
+                                    block_height,
                                     block.header.transaction_count,
                                     proposer
                                 );

@@ -262,6 +262,92 @@ impl Blockchain {
     pub fn mempool_size(&self) -> usize {
         self.state.mempool.len()
     }
+
+    /// Get blocks for sync requests
+    pub fn get_blocks(&self, from_height: u64, limit: u32) -> Vec<Vec<u8>> {
+        let start_idx = if from_height > 0 { from_height - 1 } else { 0 } as usize;
+        let end_idx = std::cmp::min(start_idx + limit as usize, self.state.blocks.len());
+
+        self.state.blocks[start_idx..end_idx]
+            .iter()
+            .filter_map(|block| serde_json::to_vec(block).ok())
+            .collect()
+    }
+
+    /// Apply a synced block to local state
+    pub fn apply_synced_block(&mut self, block: Block) -> Result<(), String> {
+        // Verify height is sequential
+        if self.height == 0 {
+            // First block (genesis) can be height 1
+            if self.state.blocks.is_empty() {
+                self.state.blocks.push(block);
+                self.height = 1;
+                return Ok(());
+            }
+        }
+
+        let expected_height = (self.state.blocks.len() + 1) as u64;
+        if expected_height != self.height + 1 {
+            return Err(format!(
+                "Non-sequential block: expected height {}, got {}",
+                self.height + 1,
+                expected_height
+            ));
+        }
+
+        // Apply transactions from block to update state
+        for tx in &block.transactions {
+            // Update balances (simple UTXO model)
+            for output in &tx.outputs {
+                let balance = self.state.balances.entry(output.address.clone()).or_insert(0.0);
+                *balance += output.amount;
+            }
+
+            // Update nonces for replay protection
+            if !tx.inputs.is_empty() {
+                let sender = tx.inputs[0].txid.clone();
+                self.address_nonces
+                    .entry(sender)
+                    .and_modify(|n| *n += 1)
+                    .or_insert(1);
+            }
+        }
+
+        // Add block to chain
+        self.state.blocks.push(block);
+        self.height += 1;
+
+        tracing::info!("Applied synced block, height now: {}", self.height);
+        Ok(())
+    }
+
+    /// Sync blockchain from a peer
+    pub async fn sync_from_peer(&mut self, peer_addr: &str, network: &crate::network::P2PNetwork) -> Result<(), String> {
+        use crate::network::P2PMessage;
+
+        // Request blocks starting from height 1 (skip genesis which we create locally)
+        let msg = P2PMessage::GetBlocks {
+            from_height: self.height,
+            limit: 1000,
+        };
+
+        let _msg_bytes = serde_json::to_vec(&msg)
+            .map_err(|e| format!("Failed to serialize sync request: {}", e))?;
+
+        tracing::info!("Requesting blocks from peer {} starting at height {}", peer_addr, self.height);
+
+        // Note: In a full implementation, this would send over the QUIC connection
+        // and wait for a response. For now, this is a placeholder that will be
+        // called but needs the P2P layer to be fully connected.
+
+        if network.endpoint.is_none() {
+            return Err("P2P network not initialized".to_string());
+        }
+
+        // This would normally connect to the peer and send the request
+        // The response would be handled by handle_connection()
+        Ok(())
+    }
 }
 
 impl Default for Blockchain {
