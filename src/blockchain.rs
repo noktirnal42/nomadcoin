@@ -325,28 +325,69 @@ impl Blockchain {
     pub async fn sync_from_peer(&mut self, peer_addr: &str, network: &crate::network::P2PNetwork) -> Result<(), String> {
         use crate::network::P2PMessage;
 
-        // Request blocks starting from height 1 (skip genesis which we create locally)
-        let msg = P2PMessage::GetBlocks {
-            from_height: self.height,
-            limit: 1000,
-        };
-
-        let _msg_bytes = serde_json::to_vec(&msg)
-            .map_err(|e| format!("Failed to serialize sync request: {}", e))?;
-
-        tracing::info!("Requesting blocks from peer {} starting at height {}", peer_addr, self.height);
-
-        // Note: In a full implementation, this would send over the QUIC connection
-        // and wait for a response. For now, this is a placeholder that will be
-        // called but needs the P2P layer to be fully connected.
-
         if network.endpoint.is_none() {
             return Err("P2P network not initialized".to_string());
         }
 
-        // This would normally connect to the peer and send the request
-        // The response would be handled by handle_connection()
-        Ok(())
+        let initial_height = self.height;
+        tracing::info!("Requesting blocks from peer {} starting at height {}", peer_addr, initial_height);
+
+        // Request blocks starting from our current height
+        let request = P2PMessage::GetBlocks {
+            from_height: self.height,
+            limit: 1000,
+        };
+
+        // Send request and wait for response
+        let response_bytes = network
+            .send_message_to_peer(peer_addr, &request)
+            .await?;
+
+        // Parse response
+        match serde_json::from_slice::<P2PMessage>(&response_bytes) {
+            Ok(P2PMessage::BlocksResponse { blocks }) => {
+                if blocks.is_empty() {
+                    tracing::info!("No new blocks from peer");
+                    return Ok(());
+                }
+
+                tracing::info!("Received {} blocks from peer for sync", blocks.len());
+
+                let mut applied = 0;
+                for block_bytes in blocks {
+                    match serde_json::from_slice::<Block>(&block_bytes) {
+                        Ok(block) => {
+                            match self.apply_synced_block(block) {
+                                Ok(()) => applied += 1,
+                                Err(e) => {
+                                    tracing::warn!("Failed to apply synced block {}: {}", self.height, e);
+                                    break;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            return Err(format!("Failed to parse synced block: {}", e));
+                        }
+                    }
+                }
+
+                let new_height = self.height;
+                tracing::info!(
+                    "Sync complete: applied {} blocks, height {} → {}",
+                    applied,
+                    initial_height,
+                    new_height
+                );
+
+                if new_height > initial_height {
+                    Ok(())
+                } else {
+                    Err("Sync did not advance blockchain".to_string())
+                }
+            }
+            Ok(_) => Err("Invalid response type from peer".to_string()),
+            Err(e) => Err(format!("Failed to parse response: {}", e)),
+        }
     }
 }
 

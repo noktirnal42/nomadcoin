@@ -1,4 +1,5 @@
-use quinn::{Endpoint, ServerConfig, TransportConfig, VarInt};
+use quinn::{Endpoint, ServerConfig, TransportConfig, VarInt, Connection};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
@@ -45,6 +46,7 @@ pub struct P2PNetwork {
     pub endpoint: Option<Endpoint>,
     pub known_peers: Vec<String>,
     pub connected_peers: Vec<String>,
+    pub peer_connections: Arc<Mutex<HashMap<String, Connection>>>,
     pub tx_sender: mpsc::Sender<Transaction>,
     pub version: String,
     pub height: u64,
@@ -58,6 +60,7 @@ impl P2PNetwork {
             endpoint: None,
             known_peers: Vec::new(),
             connected_peers: Vec::new(),
+            peer_connections: Arc::new(Mutex::new(HashMap::new())),
             tx_sender,
             version: env!("CARGO_PKG_VERSION").to_string(),
             height: 0,
@@ -122,96 +125,146 @@ let endpoint = Endpoint::server(server_config, addr)?;
         Ok(())
     }
 
-    /// Handle incoming connection
+    /// Handle incoming connection (both uni and bidi streams)
 async fn handle_connection(
         connecting: quinn::Connecting,
         _tx_sender: mpsc::Sender<Transaction>,
         blockchain: Option<Arc<Mutex<Blockchain>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let connection = connecting.await?;
+        let connection = Arc::new(connecting.await?);
         let peer_addr = connection.remote_address();
 
         info!("New peer connected: {}", peer_addr);
 
         loop {
-            let mut stream: quinn::RecvStream = match connection.accept_uni().await {
-                Ok(s) => s,
-                Err(_) => break,
-            };
-
-            // Read message
-let mut buf = Vec::new();
-             let mut read_buf = [0u8; 65536];
-             loop {
-                 match stream.read(&mut read_buf).await {
-                     Ok(None) => break,
-                     Ok(Some(n)) => {
-                         buf.extend_from_slice(&read_buf[..n]);
-                     }
-                     Err(e) => {
-                         warn!("Failed to read from stream: {}", e);
-                         break;
-                     }
-                 }
-             }
-
-            if buf.is_empty() {
-                continue;
-            }
-
-            // Parse and handle message
-            match serde_json::from_slice::<P2PMessage>(&buf) {
-                Ok(msg) => {
-                    debug!("Received message from {}: {:?}", peer_addr, msg);
-                    match msg {
-                        P2PMessage::GetBlocks { from_height, limit } => {
-                            if let Some(bc) = &blockchain {
-                                let bc_guard = bc.lock().await;
-                                let blocks = bc_guard.get_blocks(from_height, limit);
-                                let response = P2PMessage::BlocksResponse { blocks };
-                                if let Ok(response_bytes) = serde_json::to_vec(&response) {
-                                    debug!("Sending {} blocks to peer {}", response_bytes.len(), peer_addr);
-                                }
-                            }
+            tokio::select! {
+                // Handle unidirectional streams (broadcasts)
+                result = connection.accept_uni() => {
+                    match result {
+                        Ok(stream) => {
+                            let blockchain = blockchain.clone();
+                            let tx_sender = _tx_sender.clone();
+                            tokio::spawn(async move {
+                                let _ = Self::handle_uni_stream(stream, tx_sender, blockchain, peer_addr).await;
+                            });
                         }
-                        P2PMessage::BlocksResponse { blocks } => {
-                            debug!("Received {} blocks from peer {}", blocks.len(), peer_addr);
-                            if let Some(bc) = &blockchain {
-                                let mut bc_guard = bc.lock().await;
-                                for block_bytes in blocks {
-                                    if let Ok(block) = serde_json::from_slice::<Block>(&block_bytes) {
-                                        if let Err(e) = bc_guard.apply_synced_block(block) {
-                                            warn!("Failed to apply synced block: {}", e);
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        P2PMessage::NewTransaction { tx } => {
-                            if let Ok(transaction) = serde_json::from_slice::<Transaction>(&tx) {
-                                let _ = _tx_sender.send(transaction).await;
-                            }
-                        }
-                        P2PMessage::NewBlock { block: _, height } => {
-                            info!("Received new block {} from {}", height, peer_addr);
-                            // In production, verify and add block to blockchain
-                        }
-                        P2PMessage::Ping => {
-                            // Respond with Pong (implementation omitted for brevity)
-                        }
-                        _ => {
-                            debug!("Received unsupported or unhandled message type");
-                        }
+                        Err(_) => break,
                     }
                 }
-                Err(e) => {
-                    warn!("Failed to parse message: {}", e);
+
+                // Handle bidirectional streams (request-response)
+                result = connection.accept_bi() => {
+                    match result {
+                        Ok((send, recv)) => {
+                            let blockchain = blockchain.clone();
+                            tokio::spawn(async move {
+                                let _ = Self::handle_bidi_stream(send, recv, blockchain, peer_addr).await;
+                            });
+                        }
+                        Err(_) => break,
+                    }
                 }
             }
-
         }
 
+        Ok(())
+    }
+
+    /// Handle unidirectional stream (broadcast messages)
+    async fn handle_uni_stream(
+        mut stream: quinn::RecvStream,
+        tx_sender: mpsc::Sender<Transaction>,
+        blockchain: Option<Arc<Mutex<Blockchain>>>,
+        peer_addr: SocketAddr,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut buf = Vec::new();
+        let mut read_buf = [0u8; 65536];
+        loop {
+            match stream.read(&mut read_buf).await {
+                Ok(None) => break,
+                Ok(Some(n)) => buf.extend_from_slice(&read_buf[..n]),
+                Err(e) => {
+                    warn!("Failed to read from uni stream: {}", e);
+                    break;
+                }
+            }
+        }
+
+        if buf.is_empty() {
+            return Ok(());
+        }
+
+        match serde_json::from_slice::<P2PMessage>(&buf) {
+            Ok(msg) => {
+                debug!("Received broadcast from {}: {:?}", peer_addr, msg);
+                match msg {
+                    P2PMessage::NewTransaction { tx } => {
+                        if let Ok(transaction) = serde_json::from_slice::<Transaction>(&tx) {
+                            let _ = tx_sender.send(transaction).await;
+                        }
+                    }
+                    P2PMessage::NewBlock { block: _, height } => {
+                        info!("Received new block {} from {}", height, peer_addr);
+                    }
+                    _ => {
+                        debug!("Received unsupported broadcast type");
+                    }
+                }
+            }
+            Err(e) => warn!("Failed to parse broadcast message: {}", e),
+        }
+
+        Ok(())
+    }
+
+    /// Handle bidirectional stream (request-response messages)
+    async fn handle_bidi_stream(
+        mut send: quinn::SendStream,
+        mut recv: quinn::RecvStream,
+        blockchain: Option<Arc<Mutex<Blockchain>>>,
+        peer_addr: SocketAddr,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut buf = Vec::new();
+        let mut read_buf = [0u8; 65536];
+        loop {
+            match recv.read(&mut read_buf).await {
+                Ok(None) => break,
+                Ok(Some(n)) => buf.extend_from_slice(&read_buf[..n]),
+                Err(e) => {
+                    warn!("Failed to read from bidi stream: {}", e);
+                    return Ok(());
+                }
+            }
+        }
+
+        if buf.is_empty() {
+            return Ok(());
+        }
+
+        match serde_json::from_slice::<P2PMessage>(&buf) {
+            Ok(msg) => {
+                debug!("Received request from {}: {:?}", peer_addr, msg);
+                match msg {
+                    P2PMessage::GetBlocks { from_height, limit } => {
+                        if let Some(bc) = blockchain {
+                            let bc_guard = bc.lock().await;
+                            let blocks = bc_guard.get_blocks(from_height, limit);
+                            let response = P2PMessage::BlocksResponse { blocks };
+                            if let Ok(response_bytes) = serde_json::to_vec(&response) {
+                                debug!("Sending {} blocks to peer {}", response_bytes.len(), peer_addr);
+                                let _ = send.write_all(&response_bytes).await;
+                            }
+                        }
+                    }
+                    _ => {
+                        debug!("Received unsupported request type");
+                    }
+                }
+            }
+            Err(e) => warn!("Failed to parse request message: {}", e),
+        }
+
+        let _ = send.finish().await;
         Ok(())
     }
 
@@ -230,12 +283,66 @@ let mut buf = Vec::new();
 
         let peer_addr: SocketAddr = addr.parse()?;
         let connection = endpoint.connect_with(client_config, peer_addr, "localhost")?;
-        let _conn = connection.await?;
+        let conn = connection.await?;
+
+        // Store connection in peer connection pool
+        let mut connections = self.peer_connections.lock().await;
+        connections.insert(addr.to_string(), conn);
+        drop(connections);
 
         info!("Connected to peer: {}", addr);
         self.connected_peers.push(addr.to_string());
 
         Ok(())
+    }
+
+    /// Send a message to a specific peer and wait for response (bidirectional)
+    pub async fn send_message_to_peer(
+        &self,
+        peer_addr: &str,
+        msg: &P2PMessage,
+    ) -> Result<Vec<u8>, String> {
+        let connections = self.peer_connections.lock().await;
+        let connection = connections
+            .get(peer_addr)
+            .ok_or_else(|| format!("Peer {} not connected", peer_addr))?
+            .clone();
+        drop(connections);
+
+        // Open bidirectional stream
+        let (mut send, mut recv) = connection
+            .open_bi()
+            .await
+            .map_err(|e| format!("Failed to open stream: {}", e))?;
+
+        // Serialize and send request
+        let msg_bytes = serde_json::to_vec(msg)
+            .map_err(|e| format!("Failed to serialize message: {}", e))?;
+        send.write_all(&msg_bytes)
+            .await
+            .map_err(|e| format!("Failed to write message: {}", e))?;
+        send.finish()
+            .await
+            .map_err(|e| format!("Failed to finish send: {}", e))?;
+
+        // Read response
+        let mut buf = Vec::new();
+        let mut read_buf = [0u8; 65536];
+        loop {
+            match recv.read(&mut read_buf).await {
+                Ok(None) => break,
+                Ok(Some(n)) => buf.extend_from_slice(&read_buf[..n]),
+                Err(e) => {
+                    return Err(format!("Failed to read response: {}", e));
+                }
+            }
+        }
+
+        if buf.is_empty() {
+            return Err("Empty response from peer".to_string());
+        }
+
+        Ok(buf)
     }
 
     /// Broadcast transaction to all connected peers
