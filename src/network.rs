@@ -13,8 +13,12 @@ use crate::blockchain::Blockchain;
 pub enum P2PMessage {
     /// Request blocks from peer
     GetBlocks { from_height: u64, limit: u32 },
-    /// Response with blocks
-    BlocksResponse { blocks: Vec<Vec<u8>> },
+    /// Response with blocks and validators (Phase 6: validator sync)
+    BlocksResponse {
+        blocks: Vec<Vec<u8>>,
+        #[serde(default)]
+        validators: std::collections::HashMap<String, f64>,
+    },
     /// Broadcast new transaction
     NewTransaction { tx: Vec<u8> },
     /// Broadcast new block
@@ -249,9 +253,10 @@ async fn handle_connection(
                         if let Some(bc) = blockchain {
                             let bc_guard = bc.lock().await;
                             let blocks = bc_guard.get_blocks(from_height, limit);
-                            let response = P2PMessage::BlocksResponse { blocks };
+                            let validators = bc_guard.state.validators.clone();
+                            let response = P2PMessage::BlocksResponse { blocks, validators };
                             if let Ok(response_bytes) = serde_json::to_vec(&response) {
-                                debug!("Sending {} blocks to peer {}", response_bytes.len(), peer_addr);
+                                debug!("Sending {} blocks and validators to peer {}", response_bytes.len(), peer_addr);
                                 let _ = send.write_all(&response_bytes).await;
                             }
                         }

@@ -345,7 +345,7 @@ impl Blockchain {
 
         // Parse response
         match serde_json::from_slice::<P2PMessage>(&response_bytes) {
-            Ok(P2PMessage::BlocksResponse { blocks }) => {
+            Ok(P2PMessage::BlocksResponse { blocks, validators }) => {
                 if blocks.is_empty() {
                     tracing::info!("No new blocks from peer");
                     return Ok(());
@@ -369,6 +369,16 @@ impl Blockchain {
                             return Err(format!("Failed to parse synced block: {}", e));
                         }
                     }
+                }
+
+                // Merge validators from peer (Phase 6: Validator sync)
+                for (addr, stake) in validators.iter() {
+                    self.state.validators.entry(addr.clone()).or_insert(*stake);
+                }
+
+                if !validators.is_empty() {
+                    tracing::info!("Synced {} validators from peer, total: {}",
+                        validators.len(), self.state.validators.len());
                 }
 
                 let new_height = self.height;
