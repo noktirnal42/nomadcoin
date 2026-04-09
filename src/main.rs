@@ -493,26 +493,29 @@ async fn run_node(port: u16, data_dir: &str, peers: &[String]) {
         let sync_timeout = tokio::time::Duration::from_secs(15);
 
         match tokio::time::timeout(sync_timeout, async {
-            let bc = blockchain.lock().await;
-            // Request blocks from first peer
-            let _msg = network::P2PMessage::GetBlocks { from_height: bc.height(), limit: 100 };
-            // Store initial height
-            bc.height()
-        }).await {
-            Ok(_) => {
-                let bc = blockchain.lock().await;
-                println!("✅ Blockchain synced!");
-                println!("  Height:     {}", bc.height());
-                println!("  Validators: {}", consensus.validator_count());
-
-                // Reload consensus engine to reflect any validator updates
-                if let Ok(synced_consensus) = storage.load_consensus(100, 1.5) {
-                    drop(consensus); // Drop old reference
-                    consensus = synced_consensus;
+            let mut bc = blockchain.lock().await;
+            let peer_addr = &peers[0]; // Sync from first peer
+            match bc.sync_from_peer(peer_addr, &network).await {
+                Ok(()) => {
+                    println!("✅ Blockchain synced!");
+                    println!("  Height:     {}", bc.height());
+                    Ok(())
+                }
+                Err(e) => {
+                    println!("⚠️  Sync failed: {}", e);
+                    Err(e)
                 }
             }
-            Err(_) => {
-                println!("⚠️  Sync timeout. Continuing with local state.");
+        }).await {
+            Ok(Ok(())) => {
+                // Reload consensus engine to reflect validator updates
+                if let Ok(synced_consensus) = storage.load_consensus(100, 1.5) {
+                    consensus = synced_consensus;
+                    println!("  Validators: {}", consensus.validator_count());
+                }
+            }
+            Ok(Err(_)) | Err(_) => {
+                println!("⚠️  Sync timeout or error. Continuing with local state.");
             }
         }
     }
